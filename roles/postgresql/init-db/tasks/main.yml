@@ -1,0 +1,71 @@
+---
+- name: Validate PostgreSQL DB init input
+  ansible.builtin.assert:
+    that:
+      - postgresql_init_db_user | length > 0
+      - postgresql_init_db_name | length > 0
+      - >-
+        (postgresql_init_db_admin_password | length == 0)
+        or
+        (postgresql_init_db_user_password | length > 0)
+    fail_msg: >-
+      postgresql_init_db_user and postgresql_init_db_name are required;
+      postgresql_init_db_user_password is required when admin credentials are used
+
+- name: Determine whether admin credentials are provided
+  ansible.builtin.set_fact:
+    postgresql_init_db_use_admin_credentials: >-
+      {{
+        (postgresql_init_db_admin_user | length > 0)
+        and
+        (postgresql_init_db_admin_password | length > 0)
+      }}
+
+- name: Create application PostgreSQL user with admin credentials
+  community.postgresql.postgresql_user:
+    login_host: "{{ postgresql_init_db_host }}"
+    login_port: "{{ postgresql_init_db_port }}"
+    login_user: "{{ postgresql_init_db_admin_user }}"
+    login_password: "{{ postgresql_init_db_admin_password }}"
+    name: "{{ postgresql_init_db_user }}"
+    password: "{{ postgresql_init_db_user_password }}"
+    state: present
+    role_attr_flags: "{{ postgresql_init_db_role_attr_flags }}"
+    encrypted: true
+    expires: infinity
+  when: postgresql_init_db_use_admin_credentials
+
+- name: Create PostgreSQL database with admin credentials
+  community.postgresql.postgresql_db:
+    login_host: "{{ postgresql_init_db_host }}"
+    login_port: "{{ postgresql_init_db_port }}"
+    login_user: "{{ postgresql_init_db_admin_user }}"
+    login_password: "{{ postgresql_init_db_admin_password }}"
+    name: "{{ postgresql_init_db_name }}"
+    owner: "{{ postgresql_init_db_user }}"
+    encoding: "{{ postgresql_init_db_encoding }}"
+    lc_collate: "{{ postgresql_init_db_lc_collate }}"
+    lc_ctype: "{{ postgresql_init_db_lc_ctype }}"
+    template: "{{ postgresql_init_db_template }}"
+    state: present
+  when: postgresql_init_db_use_admin_credentials
+
+- name: Create PostgreSQL database as application user
+  community.postgresql.postgresql_db:
+    login_host: "{{ postgresql_init_db_host }}"
+    login_port: "{{ postgresql_init_db_port }}"
+    login_user: "{{ postgresql_init_db_user }}"
+    login_password: >-
+      {{
+        postgresql_init_db_user_password
+        if (postgresql_init_db_user_password | length > 0)
+        else omit
+      }}
+    name: "{{ postgresql_init_db_name }}"
+    owner: "{{ postgresql_init_db_user }}"
+    encoding: "{{ postgresql_init_db_encoding }}"
+    lc_collate: "{{ postgresql_init_db_lc_collate }}"
+    lc_ctype: "{{ postgresql_init_db_lc_ctype }}"
+    template: "{{ postgresql_init_db_template }}"
+    state: present
+  when: not postgresql_init_db_use_admin_credentials

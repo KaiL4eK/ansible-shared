@@ -1,0 +1,52 @@
+---
+backup_monitoring_namespace: postgresql-backup-monitoring
+backup_monitoring_service_account_name: postgresql-backup-monitoring
+
+backup_monitoring_backup_schedule: "0 8 * * 5"
+backup_monitoring_check_schedule: "0 18 * * *"
+backup_monitoring_timezone: Europe/Moscow
+
+backup_monitoring_job_image: postgres:17-alpine
+backup_monitoring_db_image_repository: bitnamilegacy/postgresql
+backup_monitoring_db_image_tag: 17.6.0-debian-12-r4
+backup_monitoring_storage_class: nfs
+backup_monitoring_backup_storage_size: 50Gi
+backup_monitoring_db_storage_size: 8Gi
+
+backup_monitoring_backup_root: /backups
+backup_monitoring_lock_dir_name: .backup-check.lock
+backup_monitoring_backup_retention_count: 10
+
+backup_monitoring_backup_pvc_name: postgresql-backup-monitoring-pvc
+backup_monitoring_backup_scripts_configmap_name: postgresql-backup-monitoring-backup-scripts
+backup_monitoring_check_scripts_configmap_name: postgresql-backup-monitoring-check-scripts
+backup_monitoring_backup_secret_name: postgresql-backup-monitoring-backup-env
+backup_monitoring_check_secret_name: postgresql-backup-monitoring-check-env
+
+backup_monitoring_db_release_name: postgresql-backup-monitoring-postgresql
+backup_monitoring_db_chart_version: 16.7.27
+backup_monitoring_db_admin_user: postgres
+backup_monitoring_db_admin_password: ""
+backup_monitoring_check_db_name: postgres
+backup_monitoring_db_internal_host: >-
+  {{ backup_monitoring_db_release_name ~ '.' ~
+    backup_monitoring_namespace ~ '.svc.cluster.local' }}
+backup_monitoring_db_internal_port: 5432
+
+backup_monitoring_source_db_host: postgresql.service.svc.cluster.local
+backup_monitoring_source_db_port: 5432
+backup_monitoring_source_db_user: postgres
+backup_monitoring_source_db_password: ""
+backup_monitoring_source_db_name: postgres
+backup_monitoring_ignored_databases: []
+backup_monitoring_ignored_table_data: {}
+
+backup_monitoring_mattermost_webhook_url: ""
+backup_monitoring_teams_webhook_url: ""
+
+backup_monitoring_backup_concurrency_policy: Forbid
+backup_monitoring_check_concurrency_policy: Forbid
+backup_monitoring_starting_deadline_seconds: 1800
+backup_monitoring_successful_jobs_history_limit: 2
+backup_monitoring_failed_jobs_history_limit: 5
+backup_monitoring_job_ttl_seconds: 86400

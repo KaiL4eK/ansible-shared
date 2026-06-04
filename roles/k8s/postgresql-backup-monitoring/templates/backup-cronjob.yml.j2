@@ -1,0 +1,44 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup-monitoring-backup
+  namespace: {{ backup_monitoring_namespace }}
+spec:
+  schedule: "{{ backup_monitoring_backup_schedule }}"
+  timeZone: {{ backup_monitoring_timezone }}
+  concurrencyPolicy: {{ backup_monitoring_backup_concurrency_policy }}
+  startingDeadlineSeconds: {{ backup_monitoring_starting_deadline_seconds }}
+  successfulJobsHistoryLimit: {{ backup_monitoring_successful_jobs_history_limit }}
+  failedJobsHistoryLimit: {{ backup_monitoring_failed_jobs_history_limit }}
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: {{ backup_monitoring_job_ttl_seconds }}
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ backup_monitoring_service_account_name }}
+          containers:
+            - name: backup
+              image: {{ backup_monitoring_job_image }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/backup.sh
+              envFrom:
+                - secretRef:
+                    name: {{ backup_monitoring_backup_secret_name }}
+              volumeMounts:
+                - name: backups
+                  mountPath: {{ backup_monitoring_backup_root }}
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ backup_monitoring_backup_pvc_name }}
+            - name: scripts
+              configMap:
+                name: {{ backup_monitoring_backup_scripts_configmap_name }}
+                defaultMode: 0755

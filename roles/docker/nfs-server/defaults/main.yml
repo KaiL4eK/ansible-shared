@@ -1,0 +1,9 @@
+nfs_host_dir: "/home/{{ ansible_user }}/nfs_server"
+nfs_container_dir: /nfsshare
+nfs_image: itsthenetwork/nfs-server-alpine:12
+nfs_container_name: nfs-server
+nfs_service_ports:
+  - "2049:2049/tcp"
+  - "2049:2049/udp"
+  - "111:111/tcp"
+  - "111:111/udp"

@@ -1,0 +1,192 @@
+#!/bin/sh
+set -eu
+
+BACKUP_ROOT="${BACKUP_ROOT:-{{ backup_monitoring_backup_root }}}"
+LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ backup_monitoring_lock_dir_name }}}"
+LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_RETENTION_COUNT="{{ backup_monitoring_backup_retention_count }}"
+WORK_DIR="/tmp/backup-${TIMESTAMP}"
+FINAL_BACKUP_DIR="${BACKUP_ROOT}/backup-${TIMESTAMP}"
+DB_LIST_PATH="${WORK_DIR}/db-list.tsv"
+DB_OWNERS_PATH="${WORK_DIR}/db-owners.tsv"
+ROLES_SQL_PATH="${WORK_DIR}/roles.sql"
+DUMPED_DB_COUNT=0
+SKIPPED_DB_COUNT=0
+
+sanitize_name() {
+  printf '%s' "$1" | tr -c '[:alnum:]_.-' '_' | sed 's/__*/_/g' | cut -c1-80
+}
+
+log_info() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+format_duration() {
+  duration_seconds="$1"
+  hours=$((duration_seconds / 3600))
+  minutes=$(((duration_seconds % 3600) / 60))
+  seconds=$((duration_seconds % 60))
+
+  if [ "${hours}" -gt 0 ]; then
+    printf '%dh %02dm %02ds' "${hours}" "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  if [ "${minutes}" -gt 0 ]; then
+    printf '%dm %02ds' "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  printf '%ds' "${seconds}"
+}
+
+format_size() {
+  size_bytes="$1"
+
+  if [ "${size_bytes}" -ge 1073741824 ]; then
+    printf '%s GiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1073741824 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1048576 ]; then
+    printf '%s MiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1048576 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1024 ]; then
+    printf '%s KiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1024 }")"
+    return 0
+  fi
+
+  printf '%s B' "${size_bytes}"
+}
+
+is_ignored_database() {
+  db_name="$1"
+
+  case "${db_name}" in
+{% for db_name in backup_monitoring_ignored_databases %}
+    {{ db_name | quote }})
+      return 0
+      ;;
+{% endfor %}
+  esac
+
+  return 1
+}
+
+cleanup() {
+  if [ -n "${WORK_DIR}" ] && [ -d "${WORK_DIR}" ]; then
+    rm -rf "${WORK_DIR}" >/dev/null 2>&1 || true
+  fi
+  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+prune_old_backups() {
+  backup_index=0
+
+  for backup_dir in $(ls -1dt "${BACKUP_ROOT}"/backup-* 2>/dev/null); do
+    [ -d "${backup_dir}" ] || continue
+    backup_index=$((backup_index + 1))
+
+    if [ "${backup_index}" -le "${BACKUP_RETENTION_COUNT}" ]; then
+      continue
+    fi
+
+    rm -rf "${backup_dir}" >/dev/null 2>&1 || true
+  done
+}
+
+if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+  printf 'backup lock is already held in %s\n' "${LOCK_DIR}" >&2
+  exit 1
+fi
+
+trap cleanup EXIT INT TERM
+
+mkdir -p "${WORK_DIR}"
+
+PGPASSWORD="${SOURCE_DB_PASSWORD}" psql \
+  -h "${SOURCE_DB_HOST}" \
+  -p "${SOURCE_DB_PORT}" \
+  -U "${SOURCE_DB_USER}" \
+  -d "${SOURCE_DB_NAME}" \
+  -At \
+  -F '|' \
+  -c "SELECT datname, pg_get_userbyid(datdba) FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname;" \
+  > "${DB_LIST_PATH}"
+
+if [ ! -s "${DB_LIST_PATH}" ]; then
+  printf 'no databases found on source PostgreSQL instance\n' >&2
+  exit 1
+fi
+
+: > "${DB_OWNERS_PATH}"
+db_index=0
+while IFS='|' read -r db_name db_owner; do
+  [ -n "${db_name}" ] || continue
+  if is_ignored_database "${db_name}"; then
+    SKIPPED_DB_COUNT=$((SKIPPED_DB_COUNT + 1))
+    log_info "skipping database ${db_name}: matched ignore rules"
+    continue
+  fi
+
+  db_index=$((db_index + 1))
+  dump_file="db-$(printf '%02d' "${db_index}")-$(sanitize_name "${db_name}").dump"
+  dump_path="${WORK_DIR}/${dump_file}"
+  dump_started_at="$(date +%s)"
+
+  printf '%s|%s|%s\n' "${db_name}" "${db_owner}" "${dump_file}" >> "${DB_OWNERS_PATH}"
+  log_info "starting dump for database ${db_name} -> ${dump_file}"
+
+  set -- \
+    -h "${SOURCE_DB_HOST}" \
+    -p "${SOURCE_DB_PORT}" \
+    -U "${SOURCE_DB_USER}" \
+    -d "${db_name}" \
+    -Fc
+
+  case "${db_name}" in
+{% for db_name, tables in backup_monitoring_ignored_table_data.items() %}
+    {{ db_name | quote }})
+{%   for table_name in tables %}
+      set -- "$@" "--exclude-table-data={{ table_name }}"
+{%   endfor %}
+      ;;
+{% endfor %}
+  esac
+
+  PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_dump \
+    "$@" \
+    -f "${dump_path}"
+
+  dump_finished_at="$(date +%s)"
+  dump_duration="$((dump_finished_at - dump_started_at))"
+  dump_size_bytes="$(wc -c < "${dump_path}" | tr -d '[:space:]')"
+  DUMPED_DB_COUNT=$((DUMPED_DB_COUNT + 1))
+  log_info "finished dump for database ${db_name}: duration=$(format_duration "${dump_duration}"), size=$(format_size "${dump_size_bytes}")"
+done < "${DB_LIST_PATH}"
+
+if [ ! -s "${DB_OWNERS_PATH}" ]; then
+  printf 'no databases left after applying backup ignore rules\n' >&2
+  exit 1
+fi
+
+PGPASSWORD="${SOURCE_DB_PASSWORD}" psql \
+  -h "${SOURCE_DB_HOST}" \
+  -p "${SOURCE_DB_PORT}" \
+  -U "${SOURCE_DB_USER}" \
+  -d "${SOURCE_DB_NAME}" \
+  -At \
+  -c "SELECT format(\$sql\$DO \$role\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %1\$L) THEN CREATE ROLE %1\$I %2\$s %3\$s %4\$s %5\$s %6\$s %7\$s CONNECTION LIMIT %8\$s; ELSE ALTER ROLE %1\$I %2\$s %3\$s %4\$s %5\$s %6\$s %7\$s CONNECTION LIMIT %8\$s; END IF; %9\$s %10\$s END \$role\$;\$sql\$, r.rolname, CASE WHEN r.rolsuper THEN 'SUPERUSER' ELSE 'NOSUPERUSER' END, CASE WHEN r.rolcreatedb THEN 'CREATEDB' ELSE 'NOCREATEDB' END, CASE WHEN r.rolcreaterole THEN 'CREATEROLE' ELSE 'NOCREATEROLE' END, CASE WHEN r.rolinherit THEN 'INHERIT' ELSE 'NOINHERIT' END, CASE WHEN r.rolreplication THEN 'REPLICATION' ELSE 'NOREPLICATION' END, CASE WHEN r.rolcanlogin THEN 'LOGIN' ELSE 'NOLOGIN' END, r.rolconnlimit, CASE WHEN r.rolpassword IS NULL THEN format('ALTER ROLE %I PASSWORD NULL;', r.rolname) ELSE format('ALTER ROLE %I PASSWORD %L;', r.rolname, r.rolpassword) END, CASE WHEN r.rolvaliduntil IS NULL THEN format('ALTER ROLE %I VALID UNTIL ''infinity'';', r.rolname) ELSE format('ALTER ROLE %I VALID UNTIL %L;', r.rolname, r.rolvaliduntil) END) FROM pg_authid AS r WHERE r.rolname <> 'postgres' AND r.rolname !~ '^pg_' ORDER BY r.rolname;" \
+  > "${ROLES_SQL_PATH}"
+
+mv "${WORK_DIR}" "${FINAL_BACKUP_DIR}"
+WORK_DIR=""
+
+log_info "backup stored in ${FINAL_BACKUP_DIR}"
+backup_total_size_bytes="$(du -sb "${FINAL_BACKUP_DIR}" | cut -f1)"
+log_info "backup summary: dumped=${DUMPED_DB_COUNT}, skipped=${SKIPPED_DB_COUNT}, total_size=$(format_size "${backup_total_size_bytes}")"
+
+prune_old_backups

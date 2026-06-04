@@ -1,0 +1,30 @@
+---
+- name: Ensure host share directory exists
+  ansible.builtin.file:
+    path: "{{ nfs_host_dir }}"
+    state: directory
+    mode: "0777"
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Pull NFS server image
+  community.docker.docker_image:
+    name: "{{ nfs_image }}"
+    source: pull
+
+- name: Run NFS Server container
+  community.docker.docker_container:
+    name: "{{ nfs_container_name }}"
+    image: "{{ nfs_image }}"
+    state: started
+    restart_policy: always
+    privileged: true
+    network_mode: host
+    env:
+      SHARED_DIRECTORY: "{{ nfs_container_dir }}"
+    volumes:
+      - "{{ nfs_host_dir }}:{{ nfs_container_dir }}"

@@ -1,0 +1,10 @@
+---
+- name: Ensure PostgreSQL backup CronJob exists
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'backup-cronjob.yml.j2') | from_yaml }}"
+
+- name: Ensure PostgreSQL backup verification CronJob exists
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'check-cronjob.yml.j2') | from_yaml }}"

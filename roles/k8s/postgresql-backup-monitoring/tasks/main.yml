@@ -1,0 +1,6 @@
+---
+- name: Prepare PostgreSQL backup monitoring infrastructure
+  ansible.builtin.import_tasks: infra.yml
+
+- name: Deploy PostgreSQL backup monitoring jobs
+  ansible.builtin.import_tasks: jobs.yml

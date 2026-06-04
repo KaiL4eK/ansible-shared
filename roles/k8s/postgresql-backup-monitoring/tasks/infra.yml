@@ -1,0 +1,163 @@
+---
+- name: Assert required PostgreSQL backup monitoring variables are set
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_source_db_host | length > 0
+      - backup_monitoring_source_db_user | length > 0
+      - backup_monitoring_db_admin_user | length > 0
+      - backup_monitoring_db_admin_password | length > 0
+      - backup_monitoring_check_db_name | length > 0
+      - backup_monitoring_source_db_password | length > 0
+      - backup_monitoring_ignored_databases is sequence
+      - backup_monitoring_ignored_databases is not string
+      - backup_monitoring_ignored_table_data is mapping
+    fail_msg: >-
+      PostgreSQL backup monitoring requires source and verification database
+      connection settings. Set backup_monitoring_source_db_host,
+      backup_monitoring_source_db_user, backup_monitoring_source_db_password,
+      backup_monitoring_db_admin_user, backup_monitoring_db_admin_password and
+      backup_monitoring_check_db_name in inventory/group_vars or an encrypted
+      vault. backup_monitoring_ignored_databases must be a list of database
+      names and backup_monitoring_ignored_table_data must be a mapping from
+      database name to a list of schema-qualified table names.
+
+- name: Assert ignored table data entries are valid
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - item.value is sequence
+      - item.value is not string
+      - item.value | map('string') | list == item.value
+    fail_msg: >-
+      backup_monitoring_ignored_table_data must map each database name to a
+      list of schema-qualified table names.
+  loop: "{{ backup_monitoring_ignored_table_data | dict2items }}"
+
+- name: Assert ignored databases entries are valid
+  ansible.builtin.assert:
+    that:
+      - item is string
+    fail_msg: >-
+      backup_monitoring_ignored_databases must contain only database names.
+  loop: "{{ backup_monitoring_ignored_databases }}"
+
+- name: Ensure PostgreSQL backup monitoring namespace exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ backup_monitoring_namespace }}"
+
+- name: Ensure PostgreSQL backup monitoring ServiceAccount exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ backup_monitoring_service_account_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+
+- name: Ensure PostgreSQL backup monitoring backup PVC exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ backup_monitoring_backup_pvc_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ backup_monitoring_backup_storage_size }}"
+        storageClassName: "{{ backup_monitoring_storage_class }}"
+
+- name: Install PostgreSQL backup monitoring verification database
+  kubernetes.core.helm:
+    name: "{{ backup_monitoring_db_release_name }}"
+    chart_ref: oci://registry-1.docker.io/bitnamicharts/postgresql
+    chart_version: "{{ backup_monitoring_db_chart_version }}"
+    release_namespace: "{{ backup_monitoring_namespace }}"
+    create_namespace: true
+    atomic: true
+    wait: true
+    values:
+      image:
+        repository: "{{ backup_monitoring_db_image_repository }}"
+        tag: "{{ backup_monitoring_db_image_tag }}"
+      auth:
+        postgresPassword: "{{ backup_monitoring_db_admin_password }}"
+      primary:
+        persistence:
+          enabled: true
+          size: "{{ backup_monitoring_db_storage_size }}"
+          storageClass: "{{ backup_monitoring_storage_class }}"
+
+- name: Ensure PostgreSQL backup monitoring backup runtime Secret exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ backup_monitoring_backup_secret_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      type: Opaque
+      stringData:
+        BACKUP_ROOT: "{{ backup_monitoring_backup_root }}"
+        LOCK_DIR_NAME: "{{ backup_monitoring_lock_dir_name }}"
+        SOURCE_DB_HOST: "{{ backup_monitoring_source_db_host }}"
+        SOURCE_DB_PORT: "{{ backup_monitoring_source_db_port | string }}"
+        SOURCE_DB_USER: "{{ backup_monitoring_source_db_user }}"
+        SOURCE_DB_PASSWORD: "{{ backup_monitoring_source_db_password }}"
+        SOURCE_DB_NAME: "{{ backup_monitoring_source_db_name }}"
+
+- name: Ensure PostgreSQL backup monitoring check runtime Secret exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ backup_monitoring_check_secret_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      type: Opaque
+      stringData:
+        BACKUP_ROOT: "{{ backup_monitoring_backup_root }}"
+        LOCK_DIR_NAME: "{{ backup_monitoring_lock_dir_name }}"
+        CHECK_DB_HOST: "{{ backup_monitoring_db_internal_host }}"
+        CHECK_DB_PORT: "{{ backup_monitoring_db_internal_port | string }}"
+        CHECK_DB_USER: "{{ backup_monitoring_db_admin_user }}"
+        CHECK_DB_PASSWORD: "{{ backup_monitoring_db_admin_password }}"
+        CHECK_DB_NAME: "{{ backup_monitoring_check_db_name }}"
+        MATTERMOST_WEBHOOK_URL: "{{ backup_monitoring_mattermost_webhook_url }}"
+        TEAMS_WEBHOOK_URL: "{{ backup_monitoring_teams_webhook_url }}"
+
+- name: Ensure PostgreSQL backup monitoring backup script ConfigMap exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ backup_monitoring_backup_scripts_configmap_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      data:
+        backup.sh: "{{ lookup('template', 'backup-script.sh.j2') }}"
+
+- name: Ensure PostgreSQL backup monitoring check script ConfigMap exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ backup_monitoring_check_scripts_configmap_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      data:
+        check.sh: "{{ lookup('template', 'check-script.sh.j2') }}"

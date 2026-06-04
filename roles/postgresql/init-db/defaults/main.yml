@@ -1,0 +1,16 @@
+---
+postgresql_init_db_host: 127.0.0.1
+postgresql_init_db_port: 5432
+
+postgresql_init_db_admin_user: postgres
+postgresql_init_db_admin_password: ""
+
+postgresql_init_db_user: ""
+postgresql_init_db_user_password: ""
+postgresql_init_db_name: ""
+
+postgresql_init_db_encoding: UTF8
+postgresql_init_db_lc_collate: C
+postgresql_init_db_lc_ctype: C
+postgresql_init_db_template: template0
+postgresql_init_db_role_attr_flags: LOGIN
