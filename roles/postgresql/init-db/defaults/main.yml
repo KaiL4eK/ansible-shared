@@ -2,7 +2,7 @@
 postgresql_init_db_host: 127.0.0.1
 postgresql_init_db_port: 5432
 
-postgresql_init_db_admin_user: postgres
+postgresql_init_db_admin_user: ""
 postgresql_init_db_admin_password: ""
 
 postgresql_init_db_user: ""

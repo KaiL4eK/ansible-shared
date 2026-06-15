@@ -4,13 +4,7 @@
     that:
       - postgresql_init_db_user | length > 0
       - postgresql_init_db_name | length > 0
-      - >-
-        (postgresql_init_db_admin_password | length == 0)
-        or
-        (postgresql_init_db_user_password | length > 0)
-    fail_msg: >-
-      postgresql_init_db_user and postgresql_init_db_name are required;
-      postgresql_init_db_user_password is required when admin credentials are used
+    fail_msg: "postgresql_init_db_user and postgresql_init_db_name are required"
 
 - name: Determine whether admin credentials are provided
   ansible.builtin.set_fact:
