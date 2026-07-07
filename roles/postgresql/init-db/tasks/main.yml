@@ -37,10 +37,10 @@
     login_password: "{{ postgresql_init_db_admin_password }}"
     name: "{{ postgresql_init_db_name }}"
     owner: "{{ postgresql_init_db_user }}"
-    encoding: "{{ postgresql_init_db_encoding }}"
-    lc_collate: "{{ postgresql_init_db_lc_collate }}"
-    lc_ctype: "{{ postgresql_init_db_lc_ctype }}"
-    template: "{{ postgresql_init_db_template }}"
+    encoding: "{{ postgresql_init_db_encoding if postgresql_init_db_encoding is not none else omit }}"
+    lc_collate: "{{ postgresql_init_db_lc_collate if postgresql_init_db_lc_collate is not none else omit }}"
+    lc_ctype: "{{ postgresql_init_db_lc_ctype if postgresql_init_db_lc_ctype is not none else omit }}"
+    template: "{{ postgresql_init_db_template if postgresql_init_db_template is not none else omit }}"
     state: present
   when: postgresql_init_db_use_admin_credentials
 
@@ -57,9 +57,9 @@
       }}
     name: "{{ postgresql_init_db_name }}"
     owner: "{{ postgresql_init_db_user }}"
-    encoding: "{{ postgresql_init_db_encoding }}"
-    lc_collate: "{{ postgresql_init_db_lc_collate }}"
-    lc_ctype: "{{ postgresql_init_db_lc_ctype }}"
-    template: "{{ postgresql_init_db_template }}"
+    encoding: "{{ postgresql_init_db_encoding if postgresql_init_db_encoding is not none else omit }}"
+    lc_collate: "{{ postgresql_init_db_lc_collate if postgresql_init_db_lc_collate is not none else omit }}"
+    lc_ctype: "{{ postgresql_init_db_lc_ctype if postgresql_init_db_lc_ctype is not none else omit }}"
+    template: "{{ postgresql_init_db_template if postgresql_init_db_template is not none else omit }}"
     state: present
   when: not postgresql_init_db_use_admin_credentials

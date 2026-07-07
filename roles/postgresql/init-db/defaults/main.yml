@@ -9,8 +9,8 @@ postgresql_init_db_user: ""
 postgresql_init_db_user_password: ""
 postgresql_init_db_name: ""
 
-postgresql_init_db_encoding: UTF8
-postgresql_init_db_lc_collate: C
-postgresql_init_db_lc_ctype: C
-postgresql_init_db_template: template0
+postgresql_init_db_encoding: null
+postgresql_init_db_lc_collate: null
+postgresql_init_db_lc_ctype: null
+postgresql_init_db_template: null
 postgresql_init_db_role_attr_flags: LOGIN
