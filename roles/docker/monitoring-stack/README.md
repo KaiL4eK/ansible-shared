@@ -1,7 +1,7 @@
 # docker/monitoring-stack
 
 Роль разворачивает Prometheus, Grafana, Loki и Jaeger одним Docker Compose-проектом.
-Каталог проекта по умолчанию: `{{ ansible_user_home }}/ansible/monitoring`.
+Каталог проекта по умолчанию: `/home/{{ ansible_user }}/ansible/monitoring`.
 Данные сервисов хранятся в именованных Docker volumes, а конфигурации — в
 `{{ monitoring_stack_dir }}/config`.
 Для Loki и Jaeger Compose запускает одноразовые init-контейнеры, которые
