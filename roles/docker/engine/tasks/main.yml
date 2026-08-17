@@ -1,0 +1,104 @@
+---
+- name: Validate Docker Engine platform
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Debian'
+      - ansible_architecture in ['x86_64', 'amd64', 'aarch64']
+    fail_msg: >-
+      Роль docker/engine поддерживает Debian/Ubuntu и архитектуры amd64/arm64;
+      обнаружено {{ ansible_distribution }} {{ ansible_architecture }}.
+
+- name: Validate Docker Engine target user
+  ansible.builtin.assert:
+    that:
+      - docker_engine_user is defined
+      - docker_engine_user | length > 0
+    fail_msg: >-
+      Не удалось определить пользователя для добавления в группу
+      {{ docker_engine_docker_group }}. Передайте docker_engine_user явно.
+
+- name: Check existing Docker APT source files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ docker_engine_apt_source_paths }}"
+  register: docker_engine_apt_source_stats
+  when: docker_engine_add_repo | bool
+
+- name: Normalize legacy Docker APT keyring references
+  ansible.builtin.replace:
+    path: "{{ item.item }}"
+    regexp: /etc/apt/keyrings/docker\.gpg
+    replace: "{{ docker_engine_apt_keyring }}"
+  loop: "{{ docker_engine_apt_source_stats.results | default([]) }}"
+  when:
+    - docker_engine_add_repo | bool
+    - item.stat.exists
+
+- name: Install Docker Engine prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ docker_engine_apt_cache_valid_time }}"
+
+- name: Ensure APT keyring directory exists
+  ansible.builtin.file:
+    path: "{{ docker_engine_apt_keyring | dirname }}"
+    state: directory
+    mode: "0755"
+  when: docker_engine_add_repo | bool
+
+- name: Install Docker APT repository key
+  ansible.builtin.get_url:
+    url: "{{ docker_engine_apt_gpg_key }}"
+    dest: "{{ docker_engine_apt_keyring }}"
+    mode: "0644"
+    checksum: "{{ docker_engine_apt_key_checksum | default(omit, true) }}"
+  when: docker_engine_add_repo | bool
+
+- name: Configure Docker APT repository
+  ansible.builtin.apt_repository:
+    repo: "{{ docker_engine_apt_repository }}"
+    filename: docker
+    state: present
+    update_cache: true
+  when: docker_engine_add_repo | bool
+
+- name: Install Docker Engine and Compose packages
+  ansible.builtin.apt:
+    name: "{{ docker_engine_packages }}"
+    state: "{{ docker_engine_package_state }}"
+    update_cache: true
+    cache_valid_time: "{{ docker_engine_apt_cache_valid_time }}"
+
+- name: Ensure Docker configuration directory exists
+  ansible.builtin.file:
+    path: "{{ docker_engine_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Ensure Docker group exists
+  ansible.builtin.group:
+    name: "{{ docker_engine_docker_group }}"
+    state: present
+
+- name: Add Ansible SSH user to Docker group
+  ansible.builtin.user:
+    name: "{{ docker_engine_user }}"
+    groups: "{{ docker_engine_docker_group }}"
+    append: true
+  register: docker_engine_user_group
+
+- name: Reset SSH connection after Docker group change  # noqa no-handler
+  ansible.builtin.meta: reset_connection
+  when: docker_engine_user_group is changed
+
+- name: Ensure Docker service is enabled and started
+  ansible.builtin.service:
+    name: "{{ docker_engine_service_name }}"
+    enabled: true
+    state: started

@@ -1,0 +1,88 @@
+---
+- name: Validate monitoring stack service selection
+  ansible.builtin.assert:
+    that:
+      - >-
+        monitoring_stack_enable_prometheus | bool or
+        monitoring_stack_enable_grafana | bool or
+        monitoring_stack_enable_loki | bool or
+        monitoring_stack_enable_jaeger | bool
+    fail_msg: "Нужно включить хотя бы один сервис monitoring stack"
+
+- name: Create monitoring stack and configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ monitoring_stack_dir }}"
+    - "{{ monitoring_stack_config_dir }}"
+
+- name: Create service configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ monitoring_stack_config_dir }}/prometheus"
+    - "{{ monitoring_stack_config_dir }}/loki"
+    - "{{ monitoring_stack_jaeger_config_dir }}"
+    - "{{ monitoring_stack_config_dir }}/grafana/provisioning/datasources"
+
+- name: Render Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_stack_config_dir }}/prometheus/prometheus.yml"
+    mode: "0644"
+  tags:
+    - render
+  when: monitoring_stack_enable_prometheus | bool
+
+- name: Render Loki configuration
+  ansible.builtin.template:
+    src: loki-config.yml.j2
+    dest: "{{ monitoring_stack_config_dir }}/loki/config.yml"
+    mode: "0644"
+  tags:
+    - render
+  when: monitoring_stack_enable_loki | bool
+
+- name: Render Grafana data sources
+  ansible.builtin.template:
+    src: grafana-datasources.yml.j2
+    dest: >-
+      {{ monitoring_stack_config_dir }}/grafana/provisioning/datasources/datasources.yml
+    mode: "0644"
+  when: monitoring_stack_enable_grafana | bool
+  tags:
+    - render
+
+- name: Render Jaeger configuration
+  ansible.builtin.template:
+    src: jaeger-config.yml.j2
+    dest: "{{ monitoring_stack_jaeger_config_dir }}/config.yml"
+    mode: "0644"
+  when: monitoring_stack_enable_jaeger | bool
+  tags:
+    - render
+
+- name: Render Docker Compose definition
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ monitoring_stack_dir }}/docker-compose.yml"
+    mode: "0600"
+  tags:
+    - render
+
+- name: Start monitoring stack with Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_stack_dir }}"
+    project_name: "{{ monitoring_stack_project_name }}"
+    pull: "{{ monitoring_stack_compose_pull }}"
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: "{{ monitoring_stack_compose_wait_timeout }}"
+  tags:
+    - deploy

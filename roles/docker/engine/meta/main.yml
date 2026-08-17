@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: AlexDev
+  description: Установка Docker Engine и Compose plugin на Debian/Ubuntu
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - docker
+    - engine
+    - compose
+
+dependencies: []

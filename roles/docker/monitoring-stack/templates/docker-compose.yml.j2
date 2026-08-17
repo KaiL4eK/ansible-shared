@@ -1,0 +1,171 @@
+name: {{ monitoring_stack_project_name }}
+
+volumes:
+{% if monitoring_stack_enable_prometheus | bool %}
+  prometheus_data:
+{% endif %}
+{% if monitoring_stack_enable_loki | bool %}
+  loki_data:
+{% endif %}
+{% if monitoring_stack_enable_jaeger | bool %}
+  jaeger_data:
+{% endif %}
+{% if monitoring_stack_enable_grafana | bool %}
+  grafana_data:
+{% endif %}
+
+services:
+{% if monitoring_stack_enable_prometheus | bool %}
+  prometheus:
+    image: {{ monitoring_stack_prometheus_image }}
+    restart: unless-stopped
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ monitoring_stack_prometheus_retention }}
+      - --web.enable-lifecycle
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+{% endif %}
+{% if monitoring_stack_enable_loki | bool %}
+  loki_storage_init:
+    image: {{ monitoring_stack_loki_storage_init_image }}
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        mkdir -p /loki/chunks /loki/rules /loki/compactor &&
+        chown -R {{ monitoring_stack_loki_uid }}:{{ monitoring_stack_loki_gid }}
+        /loki
+    volumes:
+      - loki_data:/loki
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  loki:
+    image: {{ monitoring_stack_loki_image }}
+    restart: unless-stopped
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_loki_port }}:3100"
+    volumes:
+      - ./config/loki/config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    command:
+      - -config.file=/etc/loki/config.yml
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/loki
+        - -config.file=/etc/loki/config.yml
+        - -verify-config=true
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      loki_storage_init:
+        condition: service_completed_successfully
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+{% endif %}
+{% if monitoring_stack_enable_jaeger | bool %}
+  jaeger_storage_init:
+    image: {{ monitoring_stack_jaeger_storage_init_image }}
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        mkdir -p /badger/key /badger/data &&
+        chown -R {{ monitoring_stack_jaeger_uid }}:{{ monitoring_stack_jaeger_gid }}
+        /badger
+    volumes:
+      - jaeger_data:/badger
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  jaeger:
+    image: {{ monitoring_stack_jaeger_image }}
+    restart: unless-stopped
+    command:
+      - --config
+      - /etc/jaeger/config.yml
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_jaeger_ui_port }}:16686"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_jaeger_otlp_grpc_port }}:4317"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_jaeger_otlp_http_port }}:4318"
+    volumes:
+      - ./config/jaeger/config.yml:/etc/jaeger/config.yml:ro
+      - jaeger_data:/badger
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:13133/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      jaeger_storage_init:
+        condition: service_completed_successfully
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+{% endif %}
+{% if monitoring_stack_enable_grafana | bool %}
+  grafana:
+    image: {{ monitoring_stack_grafana_image }}
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: {{ monitoring_stack_grafana_admin_user | to_json }}
+      GF_SECURITY_ADMIN_PASSWORD: {{ monitoring_stack_grafana_admin_password | to_json }}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_port }}:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+{% if monitoring_stack_enable_prometheus | bool or monitoring_stack_enable_loki | bool or monitoring_stack_enable_jaeger | bool %}
+    depends_on:
+{% if monitoring_stack_enable_prometheus | bool %}
+      prometheus:
+        condition: service_healthy
+{% endif %}
+{% if monitoring_stack_enable_loki | bool %}
+      loki:
+        condition: service_healthy
+{% endif %}
+{% if monitoring_stack_enable_jaeger | bool %}
+      jaeger:
+        condition: service_healthy
+{% endif %}
+{% endif %}
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+{% endif %}

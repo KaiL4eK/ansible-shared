@@ -1,0 +1,29 @@
+apiVersion: 1
+prune: true
+
+datasources:
+{% if monitoring_stack_enable_prometheus | bool %}
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+{% endif %}
+{% if monitoring_stack_enable_loki | bool %}
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+{% endif %}
+{% if monitoring_stack_enable_jaeger | bool %}
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+{% endif %}

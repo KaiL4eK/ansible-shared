@@ -1,0 +1,6 @@
+global:
+  scrape_interval: {{ monitoring_stack_prometheus_scrape_interval }}
+  evaluation_interval: {{ monitoring_stack_prometheus_scrape_interval }}
+
+scrape_configs:
+{{ monitoring_stack_prometheus_scrape_configs | to_nice_yaml(sort_keys=False) | indent(2, true) }}

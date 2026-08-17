@@ -29,5 +29,7 @@ Before working with this repository, install Ansible dependencies:
 ## Current Content
 
 - `roles/docker/nfs-server/` provides a shared Docker-based NFS server role.
+- `roles/docker/engine/` устанавливает Docker Engine и Docker Compose и
+  управляет доступом к группе `docker`.
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL.

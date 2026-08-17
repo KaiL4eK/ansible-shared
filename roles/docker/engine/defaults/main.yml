@@ -1,0 +1,39 @@
+---
+docker_engine_add_repo: true
+docker_engine_repo_url: https://download.docker.com/linux
+docker_engine_apt_release_channel: stable
+docker_engine_apt_distribution: >-
+  {{ 'ubuntu' if ansible_distribution in ['Pop!_OS', 'Linux Mint']
+  else ansible_distribution }}
+docker_engine_apt_arch: >-
+  {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+docker_engine_apt_keyring: /etc/apt/keyrings/docker.asc
+docker_engine_apt_gpg_key: >-
+  {{ docker_engine_repo_url }}/{{ docker_engine_apt_distribution | lower }}/gpg
+docker_engine_apt_key_checksum: ""
+docker_engine_apt_source_paths:
+  - /etc/apt/sources.list
+  - /etc/apt/sources.list.d/docker.list
+  - /etc/apt/sources.list.d/docker.sources
+  - /etc/apt/sources.list.d/docker-ce.list
+  - /etc/apt/sources.list.d/docker-ce.sources
+docker_engine_apt_repository: >-
+  deb [arch={{ docker_engine_apt_arch }}
+  signed-by={{ docker_engine_apt_keyring }}]
+  {{ docker_engine_repo_url }}/{{ docker_engine_apt_distribution | lower }}
+  {{ ansible_distribution_release }} {{ docker_engine_apt_release_channel }}
+
+docker_engine_package_state: present
+docker_engine_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  - python3-docker
+
+docker_engine_service_name: docker
+docker_engine_docker_group: docker
+docker_engine_user: "{{ ansible_user | default(ansible_user_id) }}"
+docker_engine_config_dir: /etc/docker
+docker_engine_apt_cache_valid_time: 3600
