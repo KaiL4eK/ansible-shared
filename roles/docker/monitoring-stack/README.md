@@ -28,6 +28,4 @@ Healthcheck самого Loki использует встроенную пров
 
 Внешних role-зависимостей нет. Используется коллекция `community.docker`.
 
-Пример использования находится в `ansible/playbooks/projects/lrc/monitoring.yml`.
-
 Лицензия: MIT.
