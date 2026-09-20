@@ -52,6 +52,8 @@ User lingering keeps the Hermes service running after logout and across
 reboots. Values in `hermes_agent_environment` are written to the user-owned
 `<hermes home>/.env` file with mode `0600`; this is suitable for proxy settings
 and integration environment variables.
+Existing Hermes data is reassigned to the configured service user, and missing
+configuration keys are created with `hermes config set`.
 
 ## Usage
 

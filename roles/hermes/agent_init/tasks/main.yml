@@ -4,15 +4,15 @@
 
 - name: Include Hermes configuration tasks
   ansible.builtin.import_tasks: configure.yml
-  when: not ansible_check_mode or hermes_agent_bin_before_install.stat.exists
+  when: not ansible_check_mode
 
 - name: Include Hermes user gateway tasks
   ansible.builtin.import_tasks: service.yml
-  when: not ansible_check_mode or hermes_agent_bin_before_install.stat.exists
+  when: not ansible_check_mode
 
 - name: Flush Hermes service handlers before verification
   ansible.builtin.meta: flush_handlers
 
 - name: Include Hermes verification tasks
   ansible.builtin.import_tasks: verify.yml
-  when: not ansible_check_mode or hermes_agent_bin_before_install.stat.exists
+  when: not ansible_check_mode

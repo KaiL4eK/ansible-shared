@@ -84,6 +84,14 @@
     group: "{{ hermes_agent_user_group }}"
     mode: '0700'
 
+- name: Ensure Hermes data is owned by the service user
+  become: true
+  ansible.builtin.file:
+    path: "{{ hermes_agent_home }}"
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    recurse: true
+
 - name: Ensure Hermes environment file exists
   become: true
   ansible.builtin.file:

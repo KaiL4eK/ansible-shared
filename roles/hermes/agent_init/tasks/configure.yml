@@ -11,7 +11,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_current_model_provider
   changed_when: false
-  failed_when: hermes_agent_current_model_provider.rc != 0
+  failed_when: false
 
 - name: Set Hermes model provider
   become: true
@@ -24,7 +24,9 @@
       - model.provider
       - "{{ hermes_agent_model_provider }}"
   environment: "{{ hermes_agent_runtime_environment }}"
-  when: hermes_agent_current_model_provider.stdout | trim != hermes_agent_model_provider
+  when: >-
+    hermes_agent_current_model_provider.rc != 0 or
+    hermes_agent_current_model_provider.stdout | trim != hermes_agent_model_provider
   changed_when: true
   notify: Restart Hermes gateway
 
@@ -40,7 +42,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_current_model
   changed_when: false
-  failed_when: hermes_agent_current_model.rc != 0
+  failed_when: false
 
 - name: Set Hermes default model
   become: true
@@ -53,7 +55,9 @@
       - model.default
       - "{{ hermes_agent_model }}"
   environment: "{{ hermes_agent_runtime_environment }}"
-  when: hermes_agent_current_model.stdout | trim != hermes_agent_model
+  when: >-
+    hermes_agent_current_model.rc != 0 or
+    hermes_agent_current_model.stdout | trim != hermes_agent_model
   changed_when: true
   notify: Restart Hermes gateway
 
@@ -69,7 +73,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_current_model_base_url
   changed_when: false
-  failed_when: hermes_agent_current_model_base_url.rc != 0
+  failed_when: false
 
 - name: Set Hermes model base URL
   become: true
@@ -82,7 +86,9 @@
       - model.base_url
       - "{{ hermes_agent_model_base_url }}"
   environment: "{{ hermes_agent_runtime_environment }}"
-  when: hermes_agent_current_model_base_url.stdout | trim != hermes_agent_model_base_url
+  when: >-
+    hermes_agent_current_model_base_url.rc != 0 or
+    hermes_agent_current_model_base_url.stdout | trim != hermes_agent_model_base_url
   changed_when: true
   notify: Restart Hermes gateway
 
@@ -395,7 +401,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_current_onboarding_profile_build
   changed_when: false
-  failed_when: hermes_agent_current_onboarding_profile_build.rc != 0
+  failed_when: false
 
 - name: Check whether onboarding profile build is explicitly configured
   become: true
@@ -430,7 +436,9 @@
       - "{{ hermes_agent_onboarding_profile_build }}"
   environment: "{{ hermes_agent_runtime_environment }}"
   when:
-    - hermes_agent_current_onboarding_profile_build.stdout | trim != hermes_agent_onboarding_profile_build
+    - >-
+      hermes_agent_current_onboarding_profile_build.rc != 0 or
+      hermes_agent_current_onboarding_profile_build.stdout | trim != hermes_agent_onboarding_profile_build
       or not hermes_agent_onboarding_profile_build_configured
   changed_when: true
   notify: Restart Hermes gateway
