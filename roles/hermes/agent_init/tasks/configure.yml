@@ -1,0 +1,371 @@
+---
+- name: Read current Hermes model provider
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.provider
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_model_provider
+  changed_when: false
+  failed_when: hermes_agent_current_model_provider.rc != 0
+
+- name: Set Hermes model provider
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - model.provider
+      - "{{ hermes_agent_model_provider }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: hermes_agent_current_model_provider.stdout | trim != hermes_agent_model_provider
+  changed_when: true
+  notify: Restart Hermes gateway
+
+- name: Read current Hermes default model
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.default
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_model
+  changed_when: false
+  failed_when: hermes_agent_current_model.rc != 0
+
+- name: Set Hermes default model
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - model.default
+      - "{{ hermes_agent_model }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: hermes_agent_current_model.stdout | trim != hermes_agent_model
+  changed_when: true
+  notify: Restart Hermes gateway
+
+- name: Read current Hermes model base URL
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.base_url
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_model_base_url
+  changed_when: false
+  failed_when: hermes_agent_current_model_base_url.rc != 0
+
+- name: Set Hermes model base URL
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - model.base_url
+      - "{{ hermes_agent_model_base_url }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: hermes_agent_current_model_base_url.stdout | trim != hermes_agent_model_base_url
+  changed_when: true
+  notify: Restart Hermes gateway
+
+- name: Read current Hermes reasoning effort
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - agent.reasoning_effort
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_reasoning_effort
+  changed_when: false
+  failed_when: false
+
+- name: Set Hermes reasoning effort
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - agent.reasoning_effort
+      - "{{ hermes_agent_reasoning_effort }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when:
+    - hermes_agent_reasoning_effort | length > 0
+    - >-
+      hermes_agent_current_reasoning_effort.rc != 0 or
+      hermes_agent_current_reasoning_effort.stdout | trim != hermes_agent_reasoning_effort
+  changed_when: true
+  notify: Restart Hermes gateway
+
+- name: Read current Hermes model API key
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.api_key
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_model_api_key
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Hermes model API key
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - model.api_key
+      - "{{ hermes_agent_model_api_key }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when:
+    - hermes_agent_model_api_key | length > 0
+    - >-
+      hermes_agent_current_model_api_key.rc != 0 or
+      hermes_agent_current_model_api_key.stdout | trim != hermes_agent_model_api_key
+  changed_when: true
+  no_log: true
+  notify: Restart Hermes gateway
+
+- name: Read current Telegram bot token
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - TELEGRAM_BOT_TOKEN
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_telegram_bot_token
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Telegram bot token
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - TELEGRAM_BOT_TOKEN
+      - "{{ hermes_agent_telegram_bot_token }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: >-
+    hermes_agent_current_telegram_bot_token.rc != 0 or
+    hermes_agent_current_telegram_bot_token.stdout | trim != hermes_agent_telegram_bot_token
+  changed_when: true
+  no_log: true
+  notify: Restart Hermes gateway
+
+- name: Read current Telegram user allowlist
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - telegram.allow_from
+      - --json
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_telegram_user_allowlist
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: hermes_agent_telegram_user_ids | length > 0
+
+- name: Set Telegram user allowlist
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - telegram.allow_from
+      - "{{ hermes_agent_telegram_user_ids | map('string') | list | to_json }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when:
+    - hermes_agent_telegram_user_ids | length > 0
+    - >-
+      hermes_agent_current_telegram_user_allowlist.stdout | trim !=
+      (hermes_agent_telegram_user_ids | map('string') | list | to_json)
+  changed_when: true
+  no_log: true
+  notify: Restart Hermes gateway
+
+- name: Read current Telegram allowed chats
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - telegram.allowed_chats
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_telegram_allowed_chats
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Telegram allowed chats
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - telegram.allowed_chats
+      - "{{ hermes_agent_telegram_allowed_chats }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: hermes_agent_current_telegram_allowed_chats.stdout | trim != hermes_agent_telegram_allowed_chats
+  changed_when: true
+  no_log: true
+  notify: Restart Hermes gateway
+
+- name: Read current Telegram group allowed chats
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - telegram.group_allowed_chats
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_telegram_group_allowed_chats
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Telegram group allowed chats
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - telegram.group_allowed_chats
+      - "{{ hermes_agent_telegram_group_allowed_chats }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: hermes_agent_current_telegram_group_allowed_chats.stdout | trim != hermes_agent_telegram_group_allowed_chats
+  changed_when: true
+  no_log: true
+  notify: Restart Hermes gateway
+
+- name: Read current Telegram mention requirement
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - telegram.require_mention
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_telegram_require_mention
+  changed_when: false
+  failed_when: false
+
+- name: Set Telegram mention requirement
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - telegram.require_mention
+      - "{{ hermes_agent_telegram_require_mention | ternary('true', 'false') }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when: >-
+    hermes_agent_current_telegram_require_mention.rc != 0 or
+    hermes_agent_current_telegram_require_mention.stdout | trim !=
+    (hermes_agent_telegram_require_mention | ternary('true', 'false'))
+  changed_when: true
+  notify: Restart Hermes gateway
+
+- name: Read current Hermes onboarding profile build mode
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - onboarding.profile_build
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_current_onboarding_profile_build
+  changed_when: false
+  failed_when: hermes_agent_current_onboarding_profile_build.rc != 0
+
+- name: Check whether onboarding profile build is explicitly configured
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ hermes_agent_config_file }}"
+  register: hermes_agent_config_raw
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Detect explicit onboarding profile build configuration
+  ansible.builtin.set_fact:
+    hermes_agent_onboarding_profile_build_configured: >-
+      {{
+        (
+          hermes_agent_config_raw.content | default('') | b64decode
+          | default('{}', true) | from_yaml | default({}, true)
+        ).get('onboarding', {}).get('profile_build')
+        == hermes_agent_onboarding_profile_build
+      }}
+  no_log: true
+
+- name: Set Hermes onboarding profile build mode
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - set
+      - onboarding.profile_build
+      - "{{ hermes_agent_onboarding_profile_build }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  when:
+    - hermes_agent_current_onboarding_profile_build.stdout | trim != hermes_agent_onboarding_profile_build
+      or not hermes_agent_onboarding_profile_build_configured
+  changed_when: true
+  notify: Restart Hermes gateway

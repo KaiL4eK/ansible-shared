@@ -1,0 +1,126 @@
+---
+- name: Verify Hermes version
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - --version
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_version_check
+  changed_when: false
+  failed_when: hermes_agent_version_check.rc != 0
+
+- name: Verify Hermes model provider
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.provider
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_model_provider_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_model_provider_check.rc != 0 or
+    hermes_agent_model_provider_check.stdout | trim != hermes_agent_model_provider
+
+- name: Verify Hermes default model
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.default
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_model_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_model_check.rc != 0 or
+    hermes_agent_model_check.stdout | trim != hermes_agent_model
+
+- name: Verify Hermes reasoning effort
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - agent.reasoning_effort
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_reasoning_effort_check
+  changed_when: false
+  when: hermes_agent_reasoning_effort | length > 0
+  failed_when: >-
+    hermes_agent_reasoning_effort_check.rc != 0 or
+    hermes_agent_reasoning_effort_check.stdout | trim != hermes_agent_reasoning_effort
+
+- name: Verify Hermes onboarding profile build mode
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - onboarding.profile_build
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_onboarding_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_onboarding_check.rc != 0 or
+    hermes_agent_onboarding_check.stdout | trim != hermes_agent_onboarding_profile_build
+
+- name: Verify Telegram mention requirement
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - telegram.require_mention
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_telegram_require_mention_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_telegram_require_mention_check.rc != 0 or
+    hermes_agent_telegram_require_mention_check.stdout | trim !=
+    (hermes_agent_telegram_require_mention | ternary('true', 'false'))
+
+- name: Verify Hermes gateway is enabled
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - is-enabled
+      - "{{ hermes_agent_gateway_service_name }}"
+  environment: "{{ hermes_agent_runtime_environment | combine(hermes_agent_user_systemd_environment) }}"
+  register: hermes_agent_service_enabled_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_service_enabled_check.rc != 0 or
+    hermes_agent_service_enabled_check.stdout | trim != 'enabled'
+
+- name: Verify Hermes gateway is active
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - is-active
+      - "{{ hermes_agent_gateway_service_name }}"
+  environment: "{{ hermes_agent_runtime_environment | combine(hermes_agent_user_systemd_environment) }}"
+  register: hermes_agent_service_active_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_service_active_check.rc != 0 or
+    hermes_agent_service_active_check.stdout | trim != 'active'

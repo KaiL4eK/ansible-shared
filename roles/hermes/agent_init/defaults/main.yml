@@ -1,0 +1,63 @@
+---
+hermes_agent_user: "{{ hermes_user | default('hermes') }}"
+hermes_agent_user_group: "{{ hermes_user_group | default(hermes_agent_user) }}"
+hermes_agent_user_home: "{{ hermes_user_home | default('/home/' ~ hermes_agent_user) }}"
+hermes_agent_user_shell: /bin/bash
+hermes_agent_user_uid: null
+
+hermes_agent_home: "{{ hermes_home | default(hermes_agent_user_home ~ '/.hermes') }}"
+hermes_agent_install_dir: "{{ hermes_install_dir | default(hermes_agent_home ~ '/hermes-agent') }}"
+hermes_agent_bin: "{{ hermes_bin | default(hermes_agent_user_home ~ '/.local/bin/hermes') }}"
+hermes_agent_config_file: "{{ hermes_config_file | default(hermes_agent_home ~ '/config.yaml') }}"
+
+hermes_agent_runtime_environment:
+  HOME: "{{ hermes_agent_user_home }}"
+  HERMES_HOME: "{{ hermes_agent_home }}"
+  PATH: "{{ hermes_agent_user_home }}/.local/bin:{{ hermes_agent_home }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+hermes_agent_user_systemd_environment:
+  XDG_RUNTIME_DIR: "/run/user/{{ hermes_agent_user_uid }}"
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ hermes_agent_user_uid }}/bus"
+
+hermes_agent_install_url: https://hermes-agent.nousresearch.com/install.sh
+hermes_agent_install_script_path: "{{ hermes_agent_home }}/install.sh"
+hermes_agent_install_args:
+  - --non-interactive
+  - --skip-setup
+  - --skip-browser
+  - --skip-computer-use
+  - --hermes-home
+  - "{{ hermes_agent_home }}"
+  - --dir
+  - "{{ hermes_agent_install_dir }}"
+
+hermes_agent_install_packages_debian:
+  - ca-certificates
+  - curl
+  - git
+  - build-essential
+hermes_agent_install_packages_redhat:
+  - ca-certificates
+  - curl
+  - git
+  - gcc-c++
+  - make
+hermes_agent_install_package_state: present
+
+hermes_agent_model_provider: "{{ hermes_model_provider | default('custom') }}"
+hermes_agent_model: "{{ hermes_model | default('') }}"
+hermes_agent_model_base_url: "{{ hermes_model_base_url | default('') }}"
+hermes_agent_reasoning_effort: "{{ hermes_reasoning_effort | default('') }}"
+hermes_agent_model_api_key: "{{ hermes_model_api_key | default('') }}"
+
+hermes_agent_telegram_bot_token: "{{ hermes_telegram_bot_token | default('') }}"
+hermes_agent_telegram_user_ids: "{{ hermes_telegram_user_ids | default([]) }}"
+hermes_agent_telegram_chat_id: "{{ hermes_telegram_chat_id | default('') }}"
+hermes_agent_telegram_allowed_chats: "{{ hermes_telegram_allowed_chats | default(hermes_agent_telegram_chat_id) }}"
+hermes_agent_telegram_group_allowed_chats: "{{ hermes_telegram_group_allowed_chats | default(hermes_agent_telegram_chat_id) }}"
+hermes_agent_telegram_require_mention: "{{ hermes_telegram_require_mention | default(false) }}"
+
+hermes_agent_onboarding_profile_build: "{{ hermes_onboarding_profile_build | default('ask') }}"
+
+hermes_agent_gateway_service_name: hermes-gateway.service
+hermes_agent_gateway_unit_path: "{{ hermes_agent_user_home }}/.config/systemd/user/{{ hermes_agent_gateway_service_name }}"

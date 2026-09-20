@@ -33,3 +33,5 @@ Before working with this repository, install Ansible dependencies:
   управляет доступом к группе `docker`.
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL.
+- `roles/hermes/agent_init/` installs and configures a Hermes Agent user
+  service.

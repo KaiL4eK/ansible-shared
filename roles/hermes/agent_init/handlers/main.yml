@@ -1,0 +1,13 @@
+---
+- name: Restart Hermes gateway
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - gateway
+      - restart
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_gateway_restart_result
+  changed_when: hermes_agent_gateway_restart_result.rc == 0
+  failed_when: hermes_agent_gateway_restart_result.rc != 0

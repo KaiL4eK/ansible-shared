@@ -1,0 +1,15 @@
+---
+- name: Include Hermes installation tasks
+  ansible.builtin.import_tasks: install.yml
+
+- name: Include Hermes configuration tasks
+  ansible.builtin.import_tasks: configure.yml
+
+- name: Include Hermes user gateway tasks
+  ansible.builtin.import_tasks: service.yml
+
+- name: Flush Hermes service handlers before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Include Hermes verification tasks
+  ansible.builtin.import_tasks: verify.yml

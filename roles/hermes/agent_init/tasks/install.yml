@@ -1,0 +1,132 @@
+---
+- name: Validate Hermes installation inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_user | length > 0
+      - hermes_agent_user_group | length > 0
+      - hermes_agent_user_home | length > 0
+      - hermes_agent_model_provider | length > 0
+      - hermes_agent_model | length > 0
+      - hermes_agent_model_base_url | length > 0
+      - hermes_agent_reasoning_effort in ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+      - hermes_agent_telegram_bot_token | length > 0
+      - hermes_agent_telegram_bot_token is not match('^REPLACE_WITH')
+      - hermes_agent_telegram_user_ids is sequence
+      - hermes_agent_telegram_user_ids is not string
+      - hermes_agent_telegram_chat_id is match('^-?[0-9]+$')
+      - hermes_agent_telegram_require_mention is boolean
+      - hermes_agent_onboarding_profile_build in ['ask', 'off']
+      - ansible_facts.os_family in ['Debian', 'RedHat']
+    fail_msg: >-
+      Hermes requires a service user, model settings, Telegram credentials and
+      a supported Debian/RedHat Linux host.
+
+- name: Validate Telegram user IDs
+  ansible.builtin.assert:
+    that:
+      - item | string is match('^[0-9]+$')
+    fail_msg: "Telegram user IDs must be positive integers. Invalid value: {{ item }}"
+  loop: "{{ hermes_agent_telegram_user_ids }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Ensure Hermes service group exists
+  become: true
+  ansible.builtin.group:
+    name: "{{ hermes_agent_user_group }}"
+    state: present
+
+- name: Ensure Hermes service user exists
+  become: true
+  ansible.builtin.user:
+    name: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    home: "{{ hermes_agent_user_home }}"
+    shell: "{{ hermes_agent_user_shell }}"
+    create_home: true
+    state: present
+
+- name: Resolve Hermes service user UID
+  become: true
+  ansible.builtin.command:
+    argv:
+      - id
+      - -u
+      - "{{ hermes_agent_user }}"
+  register: hermes_agent_user_uid_result
+  changed_when: false
+  failed_when: >-
+    hermes_agent_user_uid_result.rc != 0 or
+    hermes_agent_user_uid_result.stdout | trim is not match('^[0-9]+$')
+
+- name: Store Hermes service user UID
+  ansible.builtin.set_fact:
+    hermes_agent_user_uid: "{{ hermes_agent_user_uid_result.stdout | trim }}"
+
+- name: Ensure Hermes operating system prerequisites are installed
+  become: true
+  ansible.builtin.package:
+    name: >-
+      {{ hermes_agent_install_packages_debian
+         if ansible_facts.os_family == 'Debian'
+         else hermes_agent_install_packages_redhat }}
+    state: "{{ hermes_agent_install_package_state }}"
+
+- name: Ensure Hermes data directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ hermes_agent_home }}"
+    state: directory
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    mode: '0700'
+
+- name: Ensure Hermes command directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ hermes_agent_user_home }}/.local/bin"
+    state: directory
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    mode: '0755'
+
+- name: Check whether Hermes is already installed
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hermes_agent_bin }}"
+  register: hermes_agent_bin_before_install
+
+- name: Download the official Hermes installer
+  become: true
+  ansible.builtin.get_url:
+    url: "{{ hermes_agent_install_url }}"
+    dest: "{{ hermes_agent_install_script_path }}"
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    mode: '0755'
+  when: not hermes_agent_bin_before_install.stat.exists
+
+- name: Run the official Hermes installer without setup wizard
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv: "{{ ['bash', hermes_agent_install_script_path] + hermes_agent_install_args }}"
+    chdir: "{{ hermes_agent_user_home }}"
+    creates: "{{ hermes_agent_bin }}"
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_install_result
+  changed_when: hermes_agent_install_result.rc == 0
+  failed_when: hermes_agent_install_result.rc != 0
+
+- name: Verify Hermes launcher exists
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hermes_agent_bin }}"
+  register: hermes_agent_bin_after_install
+
+- name: Fail if the Hermes installer did not create the launcher
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_bin_after_install.stat.exists
+      - hermes_agent_bin_after_install.stat.executable
+    fail_msg: "Hermes installer did not create an executable at {{ hermes_agent_bin }}."
