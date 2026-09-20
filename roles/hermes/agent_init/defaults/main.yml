@@ -9,11 +9,22 @@ hermes_agent_home: "{{ hermes_home | default(hermes_agent_user_home ~ '/.hermes'
 hermes_agent_install_dir: "{{ hermes_install_dir | default(hermes_agent_home ~ '/hermes-agent') }}"
 hermes_agent_bin: "{{ hermes_bin | default(hermes_agent_user_home ~ '/.local/bin/hermes') }}"
 hermes_agent_config_file: "{{ hermes_config_file | default(hermes_agent_home ~ '/config.yaml') }}"
+hermes_agent_environment_file: "{{ hermes_agent_home }}/.env"
+hermes_agent_environment: {}
+hermes_agent_path:
+  - "{{ hermes_agent_user_home }}/.local/bin"
+  - "{{ hermes_agent_home }}/bin"
+  - /usr/local/sbin
+  - /usr/local/bin
+  - /usr/sbin
+  - /usr/bin
+  - /sbin
+  - /bin
 
 hermes_agent_runtime_environment:
   HOME: "{{ hermes_agent_user_home }}"
   HERMES_HOME: "{{ hermes_agent_home }}"
-  PATH: "{{ hermes_agent_user_home }}/.local/bin:{{ hermes_agent_home }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  PATH: "{{ hermes_agent_path | join(':') }}"
 
 hermes_agent_user_systemd_environment:
   XDG_RUNTIME_DIR: "/run/user/{{ hermes_agent_user_uid }}"
@@ -47,17 +58,21 @@ hermes_agent_install_package_state: present
 hermes_agent_model_provider: "{{ hermes_model_provider | default('custom') }}"
 hermes_agent_model: "{{ hermes_model | default('') }}"
 hermes_agent_model_base_url: "{{ hermes_model_base_url | default('') }}"
+hermes_agent_model_api_mode: "{{ hermes_model_api_mode | default('chat_completions') }}"
 hermes_agent_reasoning_effort: "{{ hermes_reasoning_effort | default('') }}"
 hermes_agent_model_api_key: "{{ hermes_model_api_key | default('') }}"
 
+hermes_agent_telegram_enabled: "{{ hermes_telegram_enabled | default(true) }}"
 hermes_agent_telegram_bot_token: "{{ hermes_telegram_bot_token | default('') }}"
 hermes_agent_telegram_user_ids: "{{ hermes_telegram_user_ids | default([]) }}"
 hermes_agent_telegram_chat_id: "{{ hermes_telegram_chat_id | default('') }}"
-hermes_agent_telegram_allowed_chats: "{{ hermes_telegram_allowed_chats | default(hermes_agent_telegram_chat_id) }}"
-hermes_agent_telegram_group_allowed_chats: "{{ hermes_telegram_group_allowed_chats | default(hermes_agent_telegram_chat_id) }}"
+hermes_agent_telegram_allowed_chats: >-
+  {{ hermes_telegram_allowed_chats | default(hermes_agent_telegram_chat_id) }}
+hermes_agent_telegram_group_allowed_chats: >-
+  {{ hermes_telegram_group_allowed_chats | default(hermes_agent_telegram_chat_id) }}
 hermes_agent_telegram_require_mention: "{{ hermes_telegram_require_mention | default(false) }}"
-
 hermes_agent_onboarding_profile_build: "{{ hermes_onboarding_profile_build | default('ask') }}"
 
 hermes_agent_gateway_service_name: hermes-gateway.service
-hermes_agent_gateway_unit_path: "{{ hermes_agent_user_home }}/.config/systemd/user/{{ hermes_agent_gateway_service_name }}"
+hermes_agent_gateway_unit_path: >-
+  {{ hermes_agent_user_home }}/.config/systemd/user/{{ hermes_agent_gateway_service_name }}

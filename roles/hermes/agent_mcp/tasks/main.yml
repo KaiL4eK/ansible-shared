@@ -1,0 +1,120 @@
+---
+- name: Validate Hermes Agent MCP inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_mcp_home is match('^/')
+      - hermes_agent_mcp_config_file is match('^/')
+      - hermes_agent_mcp_server_name is match('^[A-Za-z0-9._-]{1,64}$')
+      - hermes_agent_mcp_server is mapping
+      - >-
+        ('url' in hermes_agent_mcp_server) or
+        ('command' in hermes_agent_mcp_server)
+      - >-
+        ('url' not in hermes_agent_mcp_server) or
+        (hermes_agent_mcp_server.url is string and hermes_agent_mcp_server.url | length > 0)
+      - >-
+        ('command' not in hermes_agent_mcp_server) or
+        (hermes_agent_mcp_server.command is string and hermes_agent_mcp_server.command | length > 0)
+  no_log: true
+
+- name: Ensure Hermes Agent home exists
+  ansible.builtin.file:
+    path: "{{ hermes_agent_mcp_home }}"
+    state: directory
+    owner: "{{ hermes_agent_mcp_user }}"
+    group: "{{ hermes_agent_mcp_group }}"
+    mode: "0700"
+
+- name: Ensure Hermes Agent configuration exists
+  ansible.builtin.file:
+    path: "{{ hermes_agent_mcp_config_file }}"
+    state: touch
+    owner: "{{ hermes_agent_mcp_user }}"
+    group: "{{ hermes_agent_mcp_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Read Hermes Agent configuration
+  ansible.builtin.slurp:
+    src: "{{ hermes_agent_mcp_config_file }}"
+  register: hermes_agent_mcp_config_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Validate existing Hermes Agent YAML configuration
+  ansible.builtin.assert:
+    that:
+      - >-
+        (hermes_agent_mcp_config_raw.content | b64decode | trim | length == 0) or
+        ((hermes_agent_mcp_config_raw.content | b64decode | from_yaml) is mapping)
+      - >-
+        (hermes_agent_mcp_config_raw.content | b64decode | trim | length == 0) or
+        ('mcp_servers' not in (hermes_agent_mcp_config_raw.content | b64decode | from_yaml)) or
+        ((hermes_agent_mcp_config_raw.content | b64decode | from_yaml).mcp_servers is mapping)
+    fail_msg: Hermes Agent config.yaml must contain a mapping at mcp_servers.
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Normalize an empty inline MCP server mapping
+  ansible.builtin.replace:
+    path: "{{ hermes_agent_mcp_config_file }}"
+    regexp: '^mcp_servers:\s*\{\}\s*$'
+    replace: 'mcp_servers:'
+  when: not ansible_check_mode
+  notify: Restart Hermes Agent gateway
+
+- name: Ensure the MCP server root exists
+  ansible.builtin.lineinfile:
+    path: "{{ hermes_agent_mcp_config_file }}"
+    regexp: '^mcp_servers:\s*$'
+    line: "mcp_servers:"
+    insertafter: EOF
+    owner: "{{ hermes_agent_mcp_user }}"
+    group: "{{ hermes_agent_mcp_group }}"
+    mode: "0600"
+  when: >-
+    not ansible_check_mode and
+    (hermes_agent_mcp_config_raw.content | b64decode | trim | length == 0 or
+    'mcp_servers' not in (hermes_agent_mcp_config_raw.content | b64decode | from_yaml))
+  notify: Restart Hermes Agent gateway
+
+- name: Read normalized Hermes Agent configuration
+  ansible.builtin.slurp:
+    src: "{{ hermes_agent_mcp_config_file }}"
+  register: hermes_agent_mcp_normalized_config
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Validate Hermes Agent MCP root block
+  ansible.builtin.assert:
+    that:
+      - >-
+        (hermes_agent_mcp_normalized_config.content | b64decode |
+        regex_search('(?m)^mcp_servers:\s*$')) is not none
+    fail_msg: Hermes Agent mcp_servers must be a block mapping, not an inline YAML value.
+  when: not ansible_check_mode
+  no_log: true
+
+- name: Manage Hermes Agent MCP server configuration
+  ansible.builtin.blockinfile:
+    path: "{{ hermes_agent_mcp_config_file }}"
+    insertafter: '^mcp_servers:\s*$'
+    marker: "  # {mark} ANSIBLE MANAGED HERMES MCP {{ hermes_agent_mcp_server_name }}"
+    block: "{{ lookup('ansible.builtin.template', 'mcp-server.yml.j2') }}"
+    owner: "{{ hermes_agent_mcp_user }}"
+    group: "{{ hermes_agent_mcp_group }}"
+    mode: "0600"
+  when: not ansible_check_mode
+  notify: Restart Hermes Agent gateway
+
+- name: Validate Hermes Agent configuration after MCP update
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_mcp_binary_path }}"
+      - config
+      - check
+  environment:
+    HERMES_HOME: "{{ hermes_agent_mcp_home }}"
+  changed_when: false
+  when: not ansible_check_mode

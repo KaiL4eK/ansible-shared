@@ -17,6 +17,7 @@ hermes_user: hermes
 hermes_model_provider: custom
 hermes_model: model-name
 hermes_model_base_url: https://llm-proxy.example/v1
+hermes_model_api_mode: chat_completions
 hermes_reasoning_effort: medium
 hermes_model_api_key: ""
 hermes_telegram_bot_token: "{{ vault_hermes_telegram_bot_token }}"
@@ -25,6 +26,8 @@ hermes_telegram_user_ids:
   - "987654321"
 hermes_telegram_chat_id: "123456789"
 hermes_telegram_require_mention: false
+hermes_agent_environment:
+  HTTPS_PROXY: https://proxy.example:3128
 ```
 
 Model and Telegram settings are applied with `hermes config set`. The model API
@@ -46,8 +49,9 @@ existing Hermes configuration and runtime keys. The role never manages memory,
 sessions, `state.db`, or `onboarding.seen`.
 
 User lingering keeps the Hermes service running after logout and across
-reboots. The role manages only the Hermes user systemd service and does not
-modify any existing system-scoped gateway unit.
+reboots. Values in `hermes_agent_environment` are written to the user-owned
+`<hermes home>/.env` file with mode `0600`; this is suitable for proxy settings
+and integration environment variables.
 
 ## Usage
 

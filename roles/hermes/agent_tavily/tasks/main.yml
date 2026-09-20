@@ -1,0 +1,76 @@
+---
+- name: Validate Hermes Agent Tavily inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_tavily_home | length > 0
+      - hermes_agent_tavily_binary_path | length > 0
+      - hermes_agent_tavily_token | length > 0
+      - "'\n' not in hermes_agent_tavily_token"
+      - "'\r' not in hermes_agent_tavily_token"
+      - hermes_agent_tavily_web_backend | length > 0
+  no_log: true
+
+- name: Ensure Hermes Agent environment file exists
+  ansible.builtin.file:
+    path: "{{ hermes_agent_tavily_home }}/.env"
+    state: touch
+    owner: "{{ hermes_agent_tavily_user }}"
+    group: "{{ hermes_agent_tavily_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Configure Hermes Agent Tavily token
+  ansible.builtin.lineinfile:
+    path: "{{ hermes_agent_tavily_home }}/.env"
+    regexp: ^TAVILY_API_KEY=
+    line: "TAVILY_API_KEY={{ hermes_agent_tavily_token }}"
+    owner: "{{ hermes_agent_tavily_user }}"
+    group: "{{ hermes_agent_tavily_group }}"
+    mode: "0600"
+  when: not ansible_check_mode
+  no_log: true
+  notify: Restart Hermes Agent gateway
+
+- name: Read current Hermes Agent web backend
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_tavily_binary_path }}"
+      - config
+      - get
+      - web.backend
+  environment:
+    HERMES_HOME: "{{ hermes_agent_tavily_home }}"
+  register: hermes_agent_tavily_current_web_backend
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Configure Hermes Agent Tavily web backend
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_tavily_binary_path }}"
+      - config
+      - set
+      - web.backend
+      - "{{ hermes_agent_tavily_web_backend }}"
+  environment:
+    HERMES_HOME: "{{ hermes_agent_tavily_home }}"
+  when: >-
+    not ansible_check_mode and
+    (hermes_agent_tavily_current_web_backend.rc != 0 or
+    hermes_agent_tavily_current_web_backend.stdout | trim != hermes_agent_tavily_web_backend
+    )
+  changed_when: true
+  notify: Restart Hermes Agent gateway
+
+- name: Verify Hermes Agent configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_tavily_binary_path }}"
+      - config
+      - check
+  environment:
+    HERMES_HOME: "{{ hermes_agent_tavily_home }}"
+  changed_when: false
+  when: not ansible_check_mode

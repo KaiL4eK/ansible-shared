@@ -8,7 +8,9 @@
       - hermes_agent_model_provider | length > 0
       - hermes_agent_model | length > 0
       - hermes_agent_model_base_url | length > 0
+      - hermes_agent_model_api_mode is string
       - hermes_agent_reasoning_effort in ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+      - hermes_agent_telegram_enabled is boolean
       - hermes_agent_telegram_bot_token | length > 0
       - hermes_agent_telegram_bot_token is not match('^REPLACE_WITH')
       - hermes_agent_telegram_user_ids is sequence
@@ -16,6 +18,7 @@
       - hermes_agent_telegram_chat_id is match('^-?[0-9]+$')
       - hermes_agent_telegram_require_mention is boolean
       - hermes_agent_onboarding_profile_build in ['ask', 'off']
+      - hermes_agent_environment is mapping
       - ansible_facts.os_family in ['Debian', 'RedHat']
     fail_msg: >-
       Hermes requires a service user, model settings, Telegram credentials and
@@ -81,6 +84,33 @@
     group: "{{ hermes_agent_user_group }}"
     mode: '0700'
 
+- name: Ensure Hermes environment file exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ hermes_agent_environment_file }}"
+    state: touch
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    mode: '0600'
+    access_time: preserve
+    modification_time: preserve
+
+- name: Configure Hermes runtime environment
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ hermes_agent_environment_file }}"
+    regexp: "^{{ item.key | regex_escape }}="
+    line: "{{ item.key }}={{ item.value }}"
+    owner: "{{ hermes_agent_user }}"
+    group: "{{ hermes_agent_user_group }}"
+    mode: '0600'
+  loop: "{{ hermes_agent_environment | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: not ansible_check_mode
+  no_log: true
+  notify: Restart Hermes gateway
+
 - name: Ensure Hermes command directory exists
   become: true
   ansible.builtin.file:
@@ -104,7 +134,9 @@
     owner: "{{ hermes_agent_user }}"
     group: "{{ hermes_agent_user_group }}"
     mode: '0755'
-  when: not hermes_agent_bin_before_install.stat.exists
+  when:
+    - not ansible_check_mode
+    - not hermes_agent_bin_before_install.stat.exists
 
 - name: Run the official Hermes installer without setup wizard
   become: true
@@ -115,6 +147,7 @@
     creates: "{{ hermes_agent_bin }}"
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_install_result
+  when: not ansible_check_mode
   changed_when: hermes_agent_install_result.rc == 0
   failed_when: hermes_agent_install_result.rc != 0
 
@@ -130,3 +163,4 @@
       - hermes_agent_bin_after_install.stat.exists
       - hermes_agent_bin_after_install.stat.executable
     fail_msg: "Hermes installer did not create an executable at {{ hermes_agent_bin }}."
+  when: not ansible_check_mode

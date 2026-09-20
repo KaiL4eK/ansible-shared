@@ -1,0 +1,9 @@
+---
+hermes_agent_mcp_user: "{{ hermes_user | default('hermes') }}"
+hermes_agent_mcp_group: "{{ hermes_user_group | default(hermes_agent_mcp_user) }}"
+hermes_agent_mcp_user_home: "{{ hermes_user_home | default('/home/' ~ hermes_agent_mcp_user) }}"
+hermes_agent_mcp_home: "{{ hermes_home | default(hermes_agent_mcp_user_home ~ '/.hermes') }}"
+hermes_agent_mcp_config_file: "{{ hermes_agent_mcp_home }}/config.yaml"
+hermes_agent_mcp_binary_path: "{{ hermes_bin | default(hermes_agent_mcp_user_home ~ '/.local/bin/hermes') }}"
+hermes_agent_mcp_server_name: example
+hermes_agent_mcp_server: {}

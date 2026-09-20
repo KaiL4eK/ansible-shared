@@ -1,0 +1,76 @@
+---
+- name: Validate Hermes tool-loop inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_tool_loop_user | length > 0
+      - hermes_agent_tool_loop_binary_path | length > 0
+      - hermes_agent_tool_loop_runtime_environment is mapping
+      - hermes_agent_tool_loop_hard_stop_enabled is boolean
+
+- name: Check whether Hermes is installed
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hermes_agent_tool_loop_binary_path }}"
+  register: hermes_agent_tool_loop_binary
+
+- name: Fail when Hermes is not installed
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_tool_loop_binary.stat.exists
+      - hermes_agent_tool_loop_binary.stat.executable
+    fail_msg: >-
+      Hermes binary {{ hermes_agent_tool_loop_binary_path }} must exist before
+      configuring the tool-loop hard-stop setting.
+  when: not ansible_check_mode
+
+- name: Configure Hermes tool-loop hard-stop setting
+  when: not ansible_check_mode
+  block:
+    - name: Read current Hermes tool-loop hard-stop setting
+      become: true
+      become_user: "{{ hermes_agent_tool_loop_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_tool_loop_binary_path }}"
+          - config
+          - get
+          - tool_loop_guardrails.hard_stop_enabled
+      environment: "{{ hermes_agent_tool_loop_runtime_environment }}"
+      register: hermes_agent_tool_loop_current_hard_stop
+      changed_when: false
+      failed_when: false
+
+    - name: Set Hermes tool-loop hard-stop setting
+      become: true
+      become_user: "{{ hermes_agent_tool_loop_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_tool_loop_binary_path }}"
+          - config
+          - set
+          - tool_loop_guardrails.hard_stop_enabled
+          - "{{ hermes_agent_tool_loop_hard_stop_enabled | ternary('true', 'false') }}"
+      environment: "{{ hermes_agent_tool_loop_runtime_environment }}"
+      when: >-
+        hermes_agent_tool_loop_current_hard_stop.rc != 0 or
+        hermes_agent_tool_loop_current_hard_stop.stdout | trim !=
+        (hermes_agent_tool_loop_hard_stop_enabled | ternary('true', 'false'))
+      changed_when: true
+      notify: Restart Hermes gateway after tool-loop configuration
+
+    - name: Verify Hermes tool-loop hard-stop setting
+      become: true
+      become_user: "{{ hermes_agent_tool_loop_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_tool_loop_binary_path }}"
+          - config
+          - get
+          - tool_loop_guardrails.hard_stop_enabled
+      environment: "{{ hermes_agent_tool_loop_runtime_environment }}"
+      register: hermes_agent_tool_loop_hard_stop_check
+      changed_when: false
+      failed_when: >-
+        hermes_agent_tool_loop_hard_stop_check.rc != 0 or
+        hermes_agent_tool_loop_hard_stop_check.stdout | trim !=
+        (hermes_agent_tool_loop_hard_stop_enabled | ternary('true', 'false'))

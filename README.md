@@ -35,3 +35,11 @@ Before working with this repository, install Ansible dependencies:
   monitoring for PostgreSQL.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
   service.
+- `roles/hermes/agent_env/` manages explicit Hermes environment values in the
+  user-owned `.env` file.
+- `roles/hermes/agent_mcp/` manages one MCP server entry in the Hermes
+  configuration without storing secret values in it.
+- `roles/hermes/agent_tavily/` configures the Tavily environment token and web
+  backend for Hermes.
+- `roles/hermes/agent_tool_loop/` manages the Hermes tool-loop hard-stop
+  setting.

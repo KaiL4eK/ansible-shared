@@ -43,6 +43,23 @@
     hermes_agent_model_check.rc != 0 or
     hermes_agent_model_check.stdout | trim != hermes_agent_model
 
+- name: Verify Hermes model API mode
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - model.api_mode
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_model_api_mode_check
+  changed_when: false
+  when: hermes_agent_model_api_mode | length > 0
+  failed_when: >-
+    hermes_agent_model_api_mode_check.rc != 0 or
+    hermes_agent_model_api_mode_check.stdout | trim != hermes_agent_model_api_mode
+
 - name: Verify Hermes reasoning effort
   become: true
   become_user: "{{ hermes_agent_user }}"
@@ -92,6 +109,23 @@
     hermes_agent_telegram_require_mention_check.rc != 0 or
     hermes_agent_telegram_require_mention_check.stdout | trim !=
     (hermes_agent_telegram_require_mention | ternary('true', 'false'))
+
+- name: Verify Telegram enabled state
+  become: true
+  become_user: "{{ hermes_agent_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_bin }}"
+      - config
+      - get
+      - platforms.telegram.enabled
+  environment: "{{ hermes_agent_runtime_environment }}"
+  register: hermes_agent_telegram_enabled_check
+  changed_when: false
+  failed_when: >-
+    hermes_agent_telegram_enabled_check.rc != 0 or
+    hermes_agent_telegram_enabled_check.stdout | trim !=
+    (hermes_agent_telegram_enabled | ternary('true', 'false'))
 
 - name: Verify Hermes gateway is enabled
   become: true

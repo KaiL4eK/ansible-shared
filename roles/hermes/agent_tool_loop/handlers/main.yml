@@ -1,0 +1,13 @@
+---
+- name: Restart Hermes gateway after tool-loop configuration
+  become: true
+  become_user: "{{ hermes_agent_tool_loop_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_agent_tool_loop_binary_path }}"
+      - gateway
+      - restart
+  environment: "{{ hermes_agent_tool_loop_runtime_environment }}"
+  register: hermes_agent_tool_loop_gateway_restart_result
+  changed_when: hermes_agent_tool_loop_gateway_restart_result.rc == 0
+  failed_when: hermes_agent_tool_loop_gateway_restart_result.rc != 0

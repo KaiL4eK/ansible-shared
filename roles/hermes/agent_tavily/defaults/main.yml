@@ -1,0 +1,8 @@
+---
+hermes_agent_tavily_user: "{{ hermes_user | default('hermes') }}"
+hermes_agent_tavily_group: "{{ hermes_user_group | default(hermes_agent_tavily_user) }}"
+hermes_agent_tavily_user_home: "{{ hermes_user_home | default('/home/' ~ hermes_agent_tavily_user) }}"
+hermes_agent_tavily_home: "{{ hermes_home | default(hermes_agent_tavily_user_home ~ '/.hermes') }}"
+hermes_agent_tavily_binary_path: "{{ hermes_bin | default(hermes_agent_tavily_user_home ~ '/.local/bin/hermes') }}"
+hermes_agent_tavily_token: fake
+hermes_agent_tavily_web_backend: tavily

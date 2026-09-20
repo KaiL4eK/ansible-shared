@@ -1,0 +1,56 @@
+---
+- name: Validate Hermes Agent environment inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_env_home is match('^/')
+      - hermes_agent_env_file is match('^/')
+      - hermes_agent_env_values is mapping
+      - >-
+        hermes_agent_env_values | dict2items |
+        map(attribute='key') |
+        map('regex_search', '^[A-Za-z_][A-Za-z0-9_]*$') |
+        reject('equalto', none) |
+        list |
+        length == hermes_agent_env_values | length
+      - >-
+        hermes_agent_env_values | dict2items |
+        selectattr('value', 'string') |
+        map(attribute='value') |
+        map('regex_search', '^[^\r\n]*$') |
+        reject('equalto', none) |
+        list |
+        length == hermes_agent_env_values | length
+  no_log: true
+
+- name: Ensure Hermes Agent home exists
+  ansible.builtin.file:
+    path: "{{ hermes_agent_env_home }}"
+    state: directory
+    owner: "{{ hermes_agent_env_user }}"
+    group: "{{ hermes_agent_env_group }}"
+    mode: "0700"
+
+- name: Ensure Hermes Agent environment file exists
+  ansible.builtin.file:
+    path: "{{ hermes_agent_env_file }}"
+    state: touch
+    owner: "{{ hermes_agent_env_user }}"
+    group: "{{ hermes_agent_env_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Configure Hermes Agent environment values
+  ansible.builtin.lineinfile:
+    path: "{{ hermes_agent_env_file }}"
+    regexp: "^{{ item.key | regex_escape }}="
+    line: "{{ item.key }}={{ item.value }}"
+    owner: "{{ hermes_agent_env_user }}"
+    group: "{{ hermes_agent_env_group }}"
+    mode: "0600"
+  loop: "{{ hermes_agent_env_values | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: not ansible_check_mode
+  no_log: true
+  notify: Restart Hermes Agent gateway
