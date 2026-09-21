@@ -1,0 +1,10 @@
+---
+hermes_git_restore_repository_url: ""
+hermes_git_restore_token: ""
+hermes_git_restore_username: git
+hermes_git_restore_user_home: /home/hermes
+hermes_git_restore_directory: "{{ hermes_git_restore_user_home }}/.hermes"
+hermes_git_restore_branch: main
+hermes_git_restore_user: hermes
+hermes_git_restore_group: "{{ hermes_git_restore_user }}"
+hermes_git_restore_backup_marker_path: ""

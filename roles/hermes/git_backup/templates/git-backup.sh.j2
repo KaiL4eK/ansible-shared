@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+repository={{ hermes_git_backup_directory | quote }}
+remote={{ hermes_git_backup_remote | quote }}
+branch={{ hermes_git_backup_branch | quote }}
+commit_message={{ hermes_git_backup_commit_message | quote }}
+credentials={{ hermes_git_backup_credentials_path | quote }}
+
+git_config() {
+  git -C "$repository" -c credential.helper= -c "credential.helper=store --file=$credentials" "$@"
+}
+
+git_config add --all -- .
+
+if ! git_config diff --cached --quiet; then
+  git_config commit -m "$commit_message"
+fi
+
+git_config push "$remote" "HEAD:$branch"

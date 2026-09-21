@@ -39,7 +39,11 @@ Before working with this repository, install Ansible dependencies:
   user-owned `.env` file.
 - `roles/hermes/agent_mcp/` manages one MCP server entry in the Hermes
   configuration without storing secret values in it.
-- `roles/hermes/agent_tavily/` configures the Tavily environment token and web
-  backend for Hermes.
+- `roles/hermes/agent_tavily/` configures the Tavily environment token through
+  `roles/hermes/agent_env/` and selects the web backend for Hermes.
 - `roles/hermes/agent_tool_loop/` manages the Hermes tool-loop hard-stop
   setting.
+- `roles/hermes/git_backup/` configures the Hermes Git backup repository,
+  scheduler and `GITHUB_BACKUP_TOKEN` environment value.
+- `roles/hermes/git_restore/` restores a Hermes home directory from the Git
+  backup repository without overwriting existing data.

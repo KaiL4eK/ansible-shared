@@ -10,27 +10,17 @@
       - hermes_agent_tavily_web_backend | length > 0
   no_log: true
 
-- name: Ensure Hermes Agent environment file exists
-  ansible.builtin.file:
-    path: "{{ hermes_agent_tavily_home }}/.env"
-    state: touch
-    owner: "{{ hermes_agent_tavily_user }}"
-    group: "{{ hermes_agent_tavily_group }}"
-    mode: "0600"
-    access_time: preserve
-    modification_time: preserve
-
-- name: Configure Hermes Agent Tavily token
-  ansible.builtin.lineinfile:
-    path: "{{ hermes_agent_tavily_home }}/.env"
-    regexp: ^TAVILY_API_KEY=
-    line: "TAVILY_API_KEY={{ hermes_agent_tavily_token }}"
-    owner: "{{ hermes_agent_tavily_user }}"
-    group: "{{ hermes_agent_tavily_group }}"
-    mode: "0600"
-  when: not ansible_check_mode
-  no_log: true
-  notify: Restart Hermes Agent gateway
+- name: Configure Hermes Agent Tavily environment
+  ansible.builtin.include_role:
+    name: hermes/agent_env  # noqa role-name[path]
+  vars:
+    hermes_agent_env_user: "{{ hermes_agent_tavily_user }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_group: "{{ hermes_agent_tavily_group }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_user_home: "{{ hermes_agent_tavily_user_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_home: "{{ hermes_agent_tavily_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_binary_path: "{{ hermes_agent_tavily_binary_path }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_values:  # noqa var-naming[no-role-prefix]
+      TAVILY_API_KEY: "{{ hermes_agent_tavily_token }}"
 
 - name: Read current Hermes Agent web backend
   ansible.builtin.command:

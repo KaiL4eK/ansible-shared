@@ -1,0 +1,131 @@
+---
+- name: Validate Hermes Git restore inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_git_restore_repository_url is match('^https://')
+      - hermes_git_restore_repository_url | urlsplit('username') | default('', true) | length == 0
+      - hermes_git_restore_repository_url | urlsplit('password') | default('', true) | length == 0
+      - hermes_git_restore_repository_url | urlsplit('hostname') | length > 0
+      - hermes_git_restore_username | length > 0
+      - "'\n' not in hermes_git_restore_username"
+      - "'\r' not in hermes_git_restore_username"
+      - hermes_git_restore_directory is match('^/')
+      - hermes_git_restore_branch is match('^[A-Za-z0-9._/-]+$')
+      - hermes_git_restore_user | length > 0
+      - hermes_git_restore_group | length > 0
+      - >-
+        hermes_git_restore_backup_marker_path | length == 0 or
+        (hermes_git_restore_backup_marker_path is match('^/') and
+        hermes_git_restore_backup_marker_path | dirname != '/')
+
+- name: Validate Hermes Git restore token
+  ansible.builtin.assert:
+    that:
+      - hermes_git_restore_token | length > 0
+      - "'\n' not in hermes_git_restore_token"
+      - "'\r' not in hermes_git_restore_token"
+  no_log: true
+
+- name: Install Hermes Git restore packages
+  ansible.builtin.apt:
+    name: git
+    state: present
+
+- name: Check whether Hermes home already exists
+  ansible.builtin.stat:
+    path: "{{ hermes_git_restore_directory }}"
+  register: hermes_git_restore_directory_info
+
+- name: Refuse to overwrite an existing Hermes home
+  ansible.builtin.assert:
+    that:
+      - not hermes_git_restore_directory_info.stat.exists
+      - not hermes_git_restore_directory_info.stat.islnk | default(false)
+    fail_msg: >-
+      Hermes home {{ hermes_git_restore_directory }} already exists. Remove it
+      manually only after verifying that the existing data is not needed.
+
+- name: Create temporary Hermes restore directory
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: hermes-git-restore-
+  register: hermes_git_restore_temp_directory
+  when: not ansible_check_mode
+
+- name: Restore Hermes home from Git backup
+  when: not ansible_check_mode
+  block:
+    - name: Create temporary Git credentials file
+      ansible.builtin.copy:
+        content: >-
+          {{ 'https://' ~ hermes_git_restore_username | urlencode ~ ':' ~
+          hermes_git_restore_token | urlencode ~ '@' ~
+          hermes_git_restore_repository_url | urlsplit('netloc') }}
+        dest: "{{ hermes_git_restore_temp_directory.path }}/credentials"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Clone Hermes Git backup
+      ansible.builtin.command:
+        argv:
+          - git
+          - -c
+          - credential.helper=
+          - "-c"
+          - "credential.helper=store --file={{ hermes_git_restore_temp_directory.path }}/credentials"
+          - clone
+          - --branch
+          - "{{ hermes_git_restore_branch }}"
+          - --single-branch
+          - "{{ hermes_git_restore_repository_url }}"
+          - "{{ hermes_git_restore_temp_directory.path }}/checkout"
+      environment:
+        GIT_TERMINAL_PROMPT: "0"
+      changed_when: true
+      no_log: true
+
+    - name: Install restored Hermes home
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ hermes_git_restore_temp_directory.path }}/checkout"
+          - "{{ hermes_git_restore_directory }}"
+      changed_when: true
+
+    - name: Set restored Hermes home ownership and mode
+      ansible.builtin.file:
+        path: "{{ hermes_git_restore_directory }}"
+        owner: "{{ hermes_git_restore_user }}"
+        group: "{{ hermes_git_restore_group }}"
+        mode: "0700"
+        recurse: true
+
+    - name: Ensure Hermes Git backup marker directory exists
+      ansible.builtin.file:
+        path: "{{ hermes_git_restore_backup_marker_path | dirname }}"
+        state: directory
+        owner: "{{ hermes_git_restore_user }}"
+        group: "{{ hermes_git_restore_group }}"
+        mode: "0700"
+      when:
+        - hermes_git_restore_backup_marker_path | length > 0
+
+    - name: Mark restored Hermes Git backup as initialized
+      ansible.builtin.file:
+        path: "{{ hermes_git_restore_backup_marker_path }}"
+        state: touch
+        owner: "{{ hermes_git_restore_user }}"
+        group: "{{ hermes_git_restore_group }}"
+        mode: "0600"
+        access_time: preserve
+        modification_time: preserve
+      when:
+        - hermes_git_restore_backup_marker_path | length > 0
+  always:
+    - name: Remove temporary Hermes restore directory
+      ansible.builtin.file:
+        path: "{{ hermes_git_restore_temp_directory.path }}"
+        state: absent
+      when: not ansible_check_mode

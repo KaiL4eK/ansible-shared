@@ -1,0 +1,5 @@
+# {{ hermes_git_backup_cron_name }}
+{% if hermes_git_backup_cron_timezone | length > 0 %}
+CRON_TZ={{ hermes_git_backup_cron_timezone }}
+{% endif %}
+{{ hermes_git_backup_cron_expression }} {{ hermes_git_backup_user }} {{ hermes_git_backup_script_path }}

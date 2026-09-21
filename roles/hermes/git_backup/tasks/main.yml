@@ -1,0 +1,200 @@
+---
+- name: Validate Hermes Git backup inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_git_backup_repository_url is match('^https://')
+      - hermes_git_backup_repository_url | urlsplit('username') | default('', true) | length == 0
+      - hermes_git_backup_repository_url | urlsplit('password') | default('', true) | length == 0
+      - hermes_git_backup_repository_url | urlsplit('hostname') | length > 0
+      - hermes_git_backup_username | length > 0
+      - hermes_git_backup_directory is match('^/')
+      - hermes_git_backup_branch | length > 0
+      - hermes_git_backup_remote | length > 0
+      - hermes_git_backup_user | length > 0
+      - hermes_git_backup_group | length > 0
+      - hermes_git_backup_author_name | length > 0
+      - hermes_git_backup_author_email | length > 0
+      - hermes_git_backup_commit_message | length > 0
+      - hermes_git_backup_config_directory is match('^/')
+      - hermes_git_backup_credentials_path is match('^/')
+      - hermes_git_backup_marker_path is match('^/')
+      - hermes_git_backup_script_path is match('^/')
+      - hermes_git_backup_cron_path is match('^/')
+      - hermes_git_backup_cron_expression.split() | length == 5
+      - "'\n' not in hermes_git_backup_cron_expression"
+      - "'\r' not in hermes_git_backup_cron_expression"
+      - hermes_git_backup_scheduler_package | length > 0
+      - hermes_git_backup_scheduler_service_name | length > 0
+      - "'\n' not in hermes_git_backup_cron_timezone"
+      - "'\r' not in hermes_git_backup_cron_timezone"
+
+- name: Validate Hermes Git backup token
+  ansible.builtin.assert:
+    that:
+      - hermes_git_backup_token | length > 0
+      - "'\n' not in hermes_git_backup_token"
+      - "'\r' not in hermes_git_backup_token"
+  no_log: true
+
+- name: Configure Hermes GitHub backup environment
+  ansible.builtin.include_role:
+    name: hermes/agent_env  # noqa role-name[path]
+  vars:
+    hermes_agent_env_user: "{{ hermes_git_backup_user }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_group: "{{ hermes_git_backup_group }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_user_home: "{{ hermes_git_backup_user_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_home: "{{ hermes_git_backup_directory }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_binary_path: "{{ hermes_git_backup_binary_path }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_values:  # noqa var-naming[no-role-prefix]
+      GITHUB_BACKUP_TOKEN: "{{ hermes_git_backup_github_token }}"
+  when: hermes_git_backup_github_token | length > 0
+
+- name: Install Hermes Git backup packages
+  ansible.builtin.package:
+    name:
+      - git
+      - "{{ hermes_git_backup_scheduler_package }}"
+    state: present
+
+- name: Ensure Hermes Git backup directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ hermes_git_backup_directory }}"
+      mode: "0700"
+    - path: "{{ hermes_git_backup_config_directory }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Manage Hermes Git ignore file
+  ansible.builtin.copy:
+    content: "{{ hermes_git_backup_gitignore_content }}"
+    dest: "{{ hermes_git_backup_directory }}/.gitignore"
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    mode: "0644"
+
+- name: Manage Hermes Git credentials
+  ansible.builtin.template:
+    src: credentials.j2
+    dest: "{{ hermes_git_backup_credentials_path }}"
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    mode: "0600"
+  no_log: true
+
+- name: Check whether Hermes Git repository exists
+  ansible.builtin.stat:
+    path: "{{ hermes_git_backup_directory }}/.git/HEAD"
+  register: hermes_git_backup_repository
+
+- name: Initialize Hermes Git repository
+  ansible.builtin.command:
+    argv:
+      - git
+      - init
+      - "--initial-branch={{ hermes_git_backup_branch }}"
+      - "{{ hermes_git_backup_directory }}"
+    creates: "{{ hermes_git_backup_directory }}/.git/HEAD"
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  when: not hermes_git_backup_repository.stat.exists
+
+- name: Configure Hermes Git repository
+  community.general.git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: local
+    repo: "{{ hermes_git_backup_directory }}"
+  loop:
+    - name: user.name
+      value: "{{ hermes_git_backup_author_name }}"
+    - name: user.email
+      value: "{{ hermes_git_backup_author_email }}"
+    - name: "remote.{{ hermes_git_backup_remote }}.url"
+      value: "{{ hermes_git_backup_repository_url }}"
+    - name: credential.helper
+      value: "store --file={{ hermes_git_backup_credentials_path }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  when: not ansible_check_mode or hermes_git_backup_repository.stat.exists
+
+- name: Check whether Hermes Git backup was initialized
+  ansible.builtin.stat:
+    path: "{{ hermes_git_backup_marker_path }}"
+  register: hermes_git_backup_marker
+
+- name: Check remote repository is empty on first initialization
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ hermes_git_backup_directory }}"
+      - -c
+      - credential.helper=
+      - -c
+      - "credential.helper=store --file={{ hermes_git_backup_credentials_path }}"
+      - ls-remote
+      - "{{ hermes_git_backup_remote }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  register: hermes_git_backup_remote_refs
+  changed_when: false
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not hermes_git_backup_marker.stat.exists
+
+- name: Refuse a non-empty remote repository on first initialization
+  ansible.builtin.assert:
+    that:
+      - hermes_git_backup_remote_refs.stdout | trim | length == 0
+    fail_msg: The remote repository must not contain refs during first initialization.
+  when:
+    - not ansible_check_mode
+    - not hermes_git_backup_marker.stat.exists
+
+- name: Mark Hermes Git backup as initialized
+  ansible.builtin.file:
+    path: "{{ hermes_git_backup_marker_path }}"
+    state: touch
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+  when:
+    - not ansible_check_mode
+    - not hermes_git_backup_marker.stat.exists
+
+- name: Install Hermes Git backup script
+  ansible.builtin.template:
+    src: git-backup.sh.j2
+    dest: "{{ hermes_git_backup_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Schedule Hermes Git backup
+  ansible.builtin.template:
+    src: cron.j2
+    dest: "{{ hermes_git_backup_cron_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start Hermes Git backup scheduler
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_git_backup_scheduler_service_name }}"
+    enabled: true
+    state: started
+  when: not ansible_check_mode
