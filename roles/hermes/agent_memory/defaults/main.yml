@@ -1,0 +1,23 @@
+---
+hermes_agent_memory_user: "{{ hermes_user | default('hermes') }}"
+hermes_agent_memory_user_home: >-
+  {{ hermes_user_home | default('/home/' ~ hermes_agent_memory_user) }}
+hermes_agent_memory_home: >-
+  {{ hermes_home | default(hermes_agent_memory_user_home ~ '/.hermes') }}
+hermes_agent_memory_binary_path: >-
+  {{ hermes_bin | default(hermes_agent_memory_user_home ~ '/.local/bin/hermes') }}
+hermes_agent_memory_path:
+  - "{{ hermes_agent_memory_user_home }}/.local/bin"
+  - "{{ hermes_agent_memory_home }}/bin"
+  - /usr/local/sbin
+  - /usr/local/bin
+  - /usr/sbin
+  - /usr/bin
+  - /sbin
+  - /bin
+hermes_agent_memory_runtime_environment:
+  HOME: "{{ hermes_agent_memory_user_home }}"
+  HERMES_HOME: "{{ hermes_agent_memory_home }}"
+  PATH: "{{ hermes_agent_memory_path | join(':') }}"
+hermes_agent_memory_char_limit: 2200
+hermes_agent_memory_user_char_limit: 1375

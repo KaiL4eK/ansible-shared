@@ -1,0 +1,128 @@
+---
+- name: Validate Hermes memory inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_memory_user | length > 0
+      - hermes_agent_memory_binary_path | length > 0
+      - hermes_agent_memory_runtime_environment is mapping
+      - hermes_agent_memory_char_limit is integer
+      - hermes_agent_memory_char_limit > 0
+      - hermes_agent_memory_user_char_limit is integer
+      - hermes_agent_memory_user_char_limit > 0
+
+- name: Check whether Hermes is installed
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hermes_agent_memory_binary_path }}"
+  register: hermes_agent_memory_binary
+
+- name: Fail when Hermes is not installed
+  ansible.builtin.assert:
+    that:
+      - hermes_agent_memory_binary.stat.exists
+      - hermes_agent_memory_binary.stat.executable
+    fail_msg: >-
+      Hermes binary {{ hermes_agent_memory_binary_path }} must exist before
+      configuring memory limits.
+  when: not ansible_check_mode
+
+- name: Configure Hermes memory limits
+  when: not ansible_check_mode
+  block:
+    - name: Read current Hermes memory character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - get
+          - memory.memory_char_limit
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      register: hermes_agent_memory_current_char_limit
+      changed_when: false
+      failed_when: false
+
+    - name: Set Hermes memory character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - set
+          - memory.memory_char_limit
+          - "{{ hermes_agent_memory_char_limit | string }}"
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      when: >-
+        hermes_agent_memory_current_char_limit.rc != 0 or
+        hermes_agent_memory_current_char_limit.stdout | trim !=
+        (hermes_agent_memory_char_limit | string)
+      changed_when: true
+      notify: Restart Hermes gateway after memory configuration
+
+    - name: Read current Hermes user profile character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - get
+          - memory.user_char_limit
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      register: hermes_agent_memory_current_user_char_limit
+      changed_when: false
+      failed_when: false
+
+    - name: Set Hermes user profile character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - set
+          - memory.user_char_limit
+          - "{{ hermes_agent_memory_user_char_limit | string }}"
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      when: >-
+        hermes_agent_memory_current_user_char_limit.rc != 0 or
+        hermes_agent_memory_current_user_char_limit.stdout | trim !=
+        (hermes_agent_memory_user_char_limit | string)
+      changed_when: true
+      notify: Restart Hermes gateway after memory configuration
+
+    - name: Verify Hermes memory character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - get
+          - memory.memory_char_limit
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      register: hermes_agent_memory_char_limit_check
+      changed_when: false
+      failed_when: >-
+        hermes_agent_memory_char_limit_check.rc != 0 or
+        hermes_agent_memory_char_limit_check.stdout | trim !=
+        (hermes_agent_memory_char_limit | string)
+
+    - name: Verify Hermes user profile character limit
+      become: true
+      become_user: "{{ hermes_agent_memory_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_agent_memory_binary_path }}"
+          - config
+          - get
+          - memory.user_char_limit
+      environment: "{{ hermes_agent_memory_runtime_environment }}"
+      register: hermes_agent_memory_user_char_limit_check
+      changed_when: false
+      failed_when: >-
+        hermes_agent_memory_user_char_limit_check.rc != 0 or
+        hermes_agent_memory_user_char_limit_check.stdout | trim !=
+        (hermes_agent_memory_user_char_limit | string)

@@ -39,6 +39,8 @@ Before working with this repository, install Ansible dependencies:
   user-owned `.env` file.
 - `roles/hermes/agent_mcp/` manages one MCP server entry in the Hermes
   configuration without storing secret values in it.
+- `roles/hermes/agent_memory/` manages the built-in Hermes memory and user
+  profile character limits without modifying stored memory content.
 - `roles/hermes/agent_tavily/` configures the Tavily environment token through
   `roles/hermes/agent_env/` and selects the web backend for Hermes.
 - `roles/hermes/agent_tool_loop/` manages the Hermes tool-loop hard-stop
