@@ -14,19 +14,35 @@
       - hermes_git_backup_group | length > 0
       - hermes_git_backup_author_name | length > 0
       - hermes_git_backup_author_email | length > 0
-      - hermes_git_backup_commit_message | length > 0
+      - hermes_git_backup_commit_message_prefix | length > 0
+      - >-
+        hermes_git_backup_commit_message_fallback is match(
+          '^' ~ (hermes_git_backup_commit_message_prefix | regex_escape)
+        )
+      - hermes_git_backup_commit_message_max_length is integer
+      - >-
+        hermes_git_backup_commit_message_max_length >
+        (hermes_git_backup_commit_message_prefix | length)
+      - hermes_git_backup_digest_fallback | length > 0
+      - hermes_git_backup_digest_max_length is integer
+      - hermes_git_backup_digest_max_length > 0
+      - hermes_git_backup_llm_diff_max_bytes is integer
+      - hermes_git_backup_llm_diff_max_bytes > 0
       - hermes_git_backup_config_directory is match('^/')
       - hermes_git_backup_credentials_path is match('^/')
       - hermes_git_backup_marker_path is match('^/')
       - hermes_git_backup_script_path is match('^/')
-      - hermes_git_backup_cron_path is match('^/')
+      - >-
+        hermes_git_backup_script_path is match(
+          '^' ~ (hermes_git_backup_directory | regex_escape) ~ '/scripts/'
+        )
+      - hermes_git_backup_cron_jobs_path is match('^/')
+      - hermes_git_backup_cron_name | length > 0
       - hermes_git_backup_cron_expression.split() | length == 5
       - "'\n' not in hermes_git_backup_cron_expression"
       - "'\r' not in hermes_git_backup_cron_expression"
-      - hermes_git_backup_scheduler_package | length > 0
-      - hermes_git_backup_scheduler_service_name | length > 0
-      - "'\n' not in hermes_git_backup_cron_timezone"
-      - "'\r' not in hermes_git_backup_cron_timezone"
+      - hermes_git_backup_cron_delivery | length > 0
+      - hermes_git_backup_legacy_cron_path is match('^/')
 
 - name: Validate Hermes Git backup token
   ansible.builtin.assert:
@@ -51,9 +67,7 @@
 
 - name: Install Hermes Git backup packages
   ansible.builtin.package:
-    name:
-      - git
-      - "{{ hermes_git_backup_scheduler_package }}"
+    name: git
     state: present
 
 - name: Ensure Hermes Git backup directories exist
@@ -67,6 +81,8 @@
     - path: "{{ hermes_git_backup_directory }}"
       mode: "0700"
     - path: "{{ hermes_git_backup_config_directory }}"
+      mode: "0700"
+    - path: "{{ hermes_git_backup_script_path | dirname }}"
       mode: "0700"
   loop_control:
     label: "{{ item.path }}"
@@ -104,6 +120,15 @@
   become: true
   become_user: "{{ hermes_git_backup_user }}"
   when: not hermes_git_backup_repository.stat.exists
+
+- name: Ensure Hermes Git metadata ownership
+  ansible.builtin.file:
+    path: "{{ hermes_git_backup_directory }}/.git"
+    state: directory
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    recurse: true
+  when: not ansible_check_mode or hermes_git_backup_repository.stat.exists
 
 - name: Configure Hermes Git repository
   community.general.git_config:
@@ -180,21 +205,130 @@
   ansible.builtin.template:
     src: git-backup.sh.j2
     dest: "{{ hermes_git_backup_script_path }}"
-    owner: root
-    group: root
-    mode: "0755"
+    owner: "{{ hermes_git_backup_user }}"
+    group: "{{ hermes_git_backup_group }}"
+    mode: "0700"
 
-- name: Schedule Hermes Git backup
-  ansible.builtin.template:
-    src: cron.j2
-    dest: "{{ hermes_git_backup_cron_path }}"
-    owner: root
-    group: root
-    mode: "0644"
+- name: Check whether Hermes cron jobs exist
+  ansible.builtin.stat:
+    path: "{{ hermes_git_backup_cron_jobs_path }}"
+  register: hermes_git_backup_cron_jobs_file
 
-- name: Enable and start Hermes Git backup scheduler
-  ansible.builtin.systemd_service:
-    name: "{{ hermes_git_backup_scheduler_service_name }}"
-    enabled: true
-    state: started
-  when: not ansible_check_mode
+- name: Read Hermes cron jobs
+  ansible.builtin.slurp:
+    src: "{{ hermes_git_backup_cron_jobs_path }}"
+  register: hermes_git_backup_cron_jobs_data
+  when: hermes_git_backup_cron_jobs_file.stat.exists
+
+- name: Select Hermes Git backup cron job
+  ansible.builtin.set_fact:
+    hermes_git_backup_matching_cron_jobs: >-
+      {{
+        (
+          (hermes_git_backup_cron_jobs_data.content | b64decode | from_json).jobs
+          | default([])
+        )
+        | selectattr('name', 'equalto', hermes_git_backup_cron_name)
+        | list
+        if hermes_git_backup_cron_jobs_file.stat.exists
+        else []
+      }}
+
+- name: Refuse ambiguous Hermes Git backup cron jobs
+  ansible.builtin.assert:
+    that:
+      - hermes_git_backup_matching_cron_jobs | length <= 1
+    fail_msg: >-
+      Multiple Hermes cron jobs are named {{ hermes_git_backup_cron_name }};
+      remove duplicates before applying this role.
+
+- name: Create Hermes Git backup cron job
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_git_backup_binary_path }}"
+      - cron
+      - create
+      - "{{ hermes_git_backup_cron_expression }}"
+      - --name
+      - "{{ hermes_git_backup_cron_name }}"
+      - --no-agent
+      - --script
+      - "{{ hermes_git_backup_script_path | basename }}"
+      - --deliver
+      - "{{ hermes_git_backup_cron_delivery }}"
+  environment:
+    HOME: "{{ hermes_git_backup_user_home }}"
+    HERMES_HOME: "{{ hermes_git_backup_directory }}"
+    PATH: >-
+      {{ hermes_git_backup_user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - hermes_git_backup_matching_cron_jobs | length == 0
+
+- name: Update Hermes Git backup cron job
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_git_backup_binary_path }}"
+      - cron
+      - edit
+      - "{{ hermes_git_backup_matching_cron_jobs[0].id }}"
+      - --schedule
+      - "{{ hermes_git_backup_cron_expression }}"
+      - --name
+      - "{{ hermes_git_backup_cron_name }}"
+      - --no-agent
+      - --script
+      - "{{ hermes_git_backup_script_path | basename }}"
+      - --deliver
+      - "{{ hermes_git_backup_cron_delivery }}"
+  environment:
+    HOME: "{{ hermes_git_backup_user_home }}"
+    HERMES_HOME: "{{ hermes_git_backup_directory }}"
+    PATH: >-
+      {{ hermes_git_backup_user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - hermes_git_backup_matching_cron_jobs | length == 1
+    - >-
+      hermes_git_backup_matching_cron_jobs[0].schedule.expr | default('') !=
+      hermes_git_backup_cron_expression or
+      not hermes_git_backup_matching_cron_jobs[0].no_agent | default(false) or
+      hermes_git_backup_matching_cron_jobs[0].script | default('') !=
+      (hermes_git_backup_script_path | basename) or
+      (
+        hermes_git_backup_matching_cron_jobs[0].deliver | default(['local']) !=
+        [hermes_git_backup_cron_delivery]
+      ) and (
+        hermes_git_backup_matching_cron_jobs[0].deliver | default('local') !=
+        hermes_git_backup_cron_delivery
+      )
+
+- name: Resume Hermes Git backup cron job
+  ansible.builtin.command:
+    argv:
+      - "{{ hermes_git_backup_binary_path }}"
+      - cron
+      - resume
+      - "{{ hermes_git_backup_matching_cron_jobs[0].id }}"
+  environment:
+    HOME: "{{ hermes_git_backup_user_home }}"
+    HERMES_HOME: "{{ hermes_git_backup_directory }}"
+    PATH: >-
+      {{ hermes_git_backup_user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin
+  become: true
+  become_user: "{{ hermes_git_backup_user }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - hermes_git_backup_matching_cron_jobs | length == 1
+    - not hermes_git_backup_matching_cron_jobs[0].enabled | default(true)
+
+- name: Include legacy system cron removal tasks
+  ansible.builtin.import_tasks: remove_legacy_system_cron.yml
+  when: hermes_git_backup_remove_legacy_system_cron | bool

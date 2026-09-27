@@ -1,0 +1,5 @@
+---
+- name: Remove legacy Hermes Git backup cron job
+  ansible.builtin.file:
+    path: "{{ hermes_git_backup_legacy_cron_path }}"
+    state: absent

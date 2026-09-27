@@ -12,18 +12,78 @@ hermes_git_backup_group: "{{ hermes_git_backup_user }}"
 hermes_git_backup_binary_path: "{{ hermes_git_backup_user_home }}/.local/bin/hermes"
 hermes_git_backup_author_name: Hermes Agent
 hermes_git_backup_author_email: hermes@localhost
-hermes_git_backup_commit_message: Automated Hermes backup
+hermes_git_backup_commit_message_prefix: "[Backup]"
+hermes_git_backup_commit_message_fallback: "[Backup] Automated Hermes backup"
+hermes_git_backup_commit_message_max_length: 120
+hermes_git_backup_digest_fallback: Hermes backup data updated.
+hermes_git_backup_digest_max_length: 240
+hermes_git_backup_llm_diff_max_bytes: 65536
 hermes_git_backup_gitignore_content: |
   .env
-  *.log
-  __pycache__/
+  /bin/
+  /cache/
+  /lsp/bin/
+  /lsp/node_modules/
+  secrets/
+  /state.*
+  /logs
+  /sessions
+  /channel_directory.json
+  /.skills_prompt_snapshot.json
+  **/__pycache__
+  /hermes-agent
+  /.update_check
+  /models_dev_cache.json
+  /state-snapshots
+  /.clean_shutdown
+  /gateway.pid
+  /gateway.lock
+  /gateway_state.json
+  /cron/ticker_heartbeat
+  /cron/ticker_last_success
+  /state/gateway.heartbeat
+  /.restart_last_processed.json
+  /.restart_notify.json
+  /auth.lock
+  /auth.json
+  /install.sh
+  /install_id
+  /runtime/
+  /processes.json
+  /spawn-ledger.json
+  /verification_evidence.db
+  /gateway-starts.log
+  /gateway/restart_loop.json
+  /state/gateway.lifecycle.json
+  /models_dev_cache.etag
+  **/*.lock
+  **/*.db-wal
+  **/*.db-shm
+  /cron/output/
+  /cron/executions.db
+  /cron/deliveries.db
+  /cron/usage_audit.jsonl
+  /.curator_backups/
+  /skills/.curator_backups/
+  /skills/.curator_state
+  /skills/.curator_ledger.jsonl
+  /skills/.usage.json
+  /skills/.usage.json.lock
+  /skills/.locks/
+  /backups/config/
+  /config.yaml.bak
+  /SOUL.md.bak
+  /obsidian/knowledge/.stversions/
+  /obsidian/knowledge/.trash/
+  /obsidian/knowledge/.obsidian/workspace*.json
+  /obsidian/knowledge/**/*.bak.*
 hermes_git_backup_config_directory: "{{ hermes_git_backup_user_home }}/.config/hermes-git-backup"
 hermes_git_backup_credentials_path: "{{ hermes_git_backup_config_directory }}/credentials"
 hermes_git_backup_marker_path: "{{ hermes_git_backup_config_directory }}/initialized"
-hermes_git_backup_script_path: /usr/local/sbin/hermes-git-backup
-hermes_git_backup_cron_path: /etc/cron.d/hermes-git-backup
+hermes_git_backup_script_path: "{{ hermes_git_backup_directory }}/scripts/git-backup.sh"
+hermes_git_backup_cron_jobs_path: "{{ hermes_git_backup_directory }}/cron/jobs.json"
 hermes_git_backup_cron_name: Hermes Git backup
 hermes_git_backup_cron_expression: "0 * * * *"
-hermes_git_backup_cron_timezone: ""
-hermes_git_backup_scheduler_package: cron
-hermes_git_backup_scheduler_service_name: cron
+hermes_git_backup_cron_delivery: telegram
+hermes_git_backup_remove_legacy_system_cron: false
+hermes_git_backup_legacy_cron_path: /etc/cron.d/hermes-git-backup
