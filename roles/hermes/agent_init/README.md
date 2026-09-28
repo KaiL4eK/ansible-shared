@@ -14,6 +14,8 @@ provisioning is complete, so its normal onboarding flow remains user-driven.
 
 ```yaml
 hermes_user: hermes
+hermes_agent_manage_model: true
+hermes_agent_manage_telegram: true
 hermes_model_provider: custom
 hermes_model: model-name
 hermes_model_base_url: https://llm-proxy.example/v1
@@ -36,6 +38,11 @@ its normal secret configuration path. Telegram allowlists are stored in
 `config.yaml`.
 When enabled, Hermes responds in Telegram groups only when the bot is
 mentioned.
+
+Set `hermes_agent_manage_model: false` and
+`hermes_agent_manage_telegram: false` to install and start the gateway without
+managing either setting; configure them manually later. Both switches default
+to `true` for existing playbooks.
 
 The Telegram chat ID is written both to the response allowlist and to the group
 chat authorization allowlist. The latter is harmless for a private chat and

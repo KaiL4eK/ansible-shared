@@ -23,6 +23,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_model_provider_check
   changed_when: false
+  when: hermes_agent_manage_model
   failed_when: >-
     hermes_agent_model_provider_check.rc != 0 or
     hermes_agent_model_provider_check.stdout | trim != hermes_agent_model_provider
@@ -39,6 +40,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_model_check
   changed_when: false
+  when: hermes_agent_manage_model
   failed_when: >-
     hermes_agent_model_check.rc != 0 or
     hermes_agent_model_check.stdout | trim != hermes_agent_model
@@ -55,7 +57,9 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_model_api_mode_check
   changed_when: false
-  when: hermes_agent_model_api_mode | length > 0
+  when:
+    - hermes_agent_manage_model
+    - hermes_agent_model_api_mode | length > 0
   failed_when: >-
     hermes_agent_model_api_mode_check.rc != 0 or
     hermes_agent_model_api_mode_check.stdout | trim != hermes_agent_model_api_mode
@@ -72,7 +76,9 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_reasoning_effort_check
   changed_when: false
-  when: hermes_agent_reasoning_effort | length > 0
+  when:
+    - hermes_agent_manage_model
+    - hermes_agent_reasoning_effort | length > 0
   failed_when: >-
     hermes_agent_reasoning_effort_check.rc != 0 or
     hermes_agent_reasoning_effort_check.stdout | trim != hermes_agent_reasoning_effort
@@ -105,6 +111,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_telegram_require_mention_check
   changed_when: false
+  when: hermes_agent_manage_telegram
   failed_when: >-
     hermes_agent_telegram_require_mention_check.rc != 0 or
     hermes_agent_telegram_require_mention_check.stdout | trim !=
@@ -122,6 +129,7 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_telegram_enabled_check
   changed_when: false
+  when: hermes_agent_manage_telegram
   failed_when: >-
     hermes_agent_telegram_enabled_check.rc != 0 or
     hermes_agent_telegram_enabled_check.stdout | trim !=
@@ -155,6 +163,9 @@
   environment: "{{ hermes_agent_runtime_environment | combine(hermes_agent_user_systemd_environment) }}"
   register: hermes_agent_service_active_check
   changed_when: false
+  retries: 15
+  delay: 2
+  until: hermes_agent_service_active_check.stdout | trim == 'active'
   failed_when: >-
     hermes_agent_service_active_check.rc != 0 or
     hermes_agent_service_active_check.stdout | trim != 'active'

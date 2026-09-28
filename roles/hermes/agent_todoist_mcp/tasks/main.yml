@@ -1,0 +1,67 @@
+---
+- name: Validate Todoist MCP inputs
+  ansible.builtin.assert:
+    that:
+      - hermes_todoist_mcp_api_key is string
+      - hermes_todoist_mcp_api_key | length > 0
+      - hermes_todoist_mcp_api_key is match('^[^\r\n]+$')
+      - hermes_todoist_mcp_user | length > 0
+      - hermes_todoist_mcp_home is match('^/')
+      - hermes_todoist_mcp_install_dir is match('^/')
+      - hermes_todoist_mcp_server_name is match('^[A-Za-z0-9._-]{1,64}$')
+  no_log: true
+
+- name: Ensure Todoist MCP installation directory exists
+  ansible.builtin.file:
+    path: "{{ hermes_todoist_mcp_install_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Configure Todoist token in Hermes environment
+  ansible.builtin.include_role:
+    name: hermes/agent_env  # noqa role-name[path]
+  no_log: true
+  vars:
+    hermes_agent_env_user: "{{ hermes_todoist_mcp_user }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_user_home: "{{ hermes_todoist_mcp_user_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_home: "{{ hermes_todoist_mcp_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_env_values:  # noqa var-naming[no-role-prefix]
+      TODOIST_API_KEY: "{{ hermes_todoist_mcp_api_key }}"
+
+- name: Install Todoist MCP package
+  community.general.npm:
+    name: "{{ hermes_todoist_mcp_package }}"
+    version: "{{ hermes_todoist_mcp_version }}"
+    path: "{{ hermes_todoist_mcp_install_dir }}"
+    state: present
+  when: not ansible_check_mode
+  notify: Restart Hermes Agent gateway
+
+- name: Verify Todoist MCP executable
+  ansible.builtin.stat:
+    path: "{{ hermes_todoist_mcp_install_dir }}/node_modules/.bin/todoist-mcp"
+  register: hermes_todoist_mcp_executable
+  when: not ansible_check_mode
+
+- name: Fail if Todoist MCP executable is missing
+  ansible.builtin.assert:
+    that:
+      - hermes_todoist_mcp_executable.stat.exists
+      - hermes_todoist_mcp_executable.stat.executable
+    fail_msg: npm did not install an executable Todoist MCP server.
+  when: not ansible_check_mode
+
+- name: Configure Todoist MCP server in Hermes
+  ansible.builtin.include_role:
+    name: hermes/agent_mcp  # noqa role-name[path]
+  vars:
+    hermes_agent_mcp_user: "{{ hermes_todoist_mcp_user }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_mcp_user_home: "{{ hermes_todoist_mcp_user_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_mcp_home: "{{ hermes_todoist_mcp_home }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_mcp_server_name: "{{ hermes_todoist_mcp_server_name }}"  # noqa var-naming[no-role-prefix]
+    hermes_agent_mcp_server:  # noqa var-naming[no-role-prefix]
+      command: "{{ hermes_todoist_mcp_install_dir }}/node_modules/.bin/todoist-mcp"
+      args: []
+      env:
+        TODOIST_API_KEY: "${TODOIST_API_KEY}"
+      enabled: true

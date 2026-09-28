@@ -1,0 +1,6 @@
+---
+nodejs_runtime_major_version: 24
+nodejs_runtime_minimum_npm_major_version: 11
+nodejs_runtime_key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+nodejs_runtime_key_path: /etc/apt/keyrings/nodesource.asc
+nodejs_runtime_sources_path: /etc/apt/sources.list.d/nodesource.list

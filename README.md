@@ -39,6 +39,8 @@ Before working with this repository, install Ansible dependencies:
   user-owned `.env` file.
 - `roles/hermes/agent_mcp/` manages one MCP server entry in the Hermes
   configuration without storing secret values in it.
+- `roles/hermes/agent_todoist_mcp/` installs the local Todoist MCP server and
+  connects it to Hermes using an API key stored in the user environment.
 - `roles/hermes/agent_memory/` manages the built-in Hermes memory and user
   profile character limits without modifying stored memory content.
 - `roles/hermes/agent_tavily/` configures the Tavily environment token through
@@ -49,3 +51,5 @@ Before working with this repository, install Ansible dependencies:
   scheduler and `GITHUB_BACKUP_TOKEN` environment value.
 - `roles/hermes/git_restore/` restores a Hermes home directory from the Git
   backup repository without overwriting existing data.
+- `roles/nodejs/runtime/` installs Node.js and npm from NodeSource on Debian
+  and Ubuntu hosts.

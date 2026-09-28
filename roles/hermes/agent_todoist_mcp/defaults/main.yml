@@ -1,0 +1,9 @@
+---
+hermes_todoist_mcp_user: hermes
+hermes_todoist_mcp_user_home: "/home/{{ hermes_todoist_mcp_user }}"
+hermes_todoist_mcp_home: "{{ hermes_todoist_mcp_user_home }}/.hermes"
+hermes_todoist_mcp_api_key: null
+hermes_todoist_mcp_package: "@doist/todoist-mcp"
+hermes_todoist_mcp_version: "13.1.3"
+hermes_todoist_mcp_install_dir: /opt/hermes-todoist-mcp
+hermes_todoist_mcp_server_name: todoist

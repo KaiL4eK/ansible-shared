@@ -109,12 +109,15 @@
   notify: Restart Hermes Agent gateway
 
 - name: Validate Hermes Agent configuration after MCP update
+  become: true
+  become_user: "{{ hermes_agent_mcp_user }}"
   ansible.builtin.command:
     argv:
       - "{{ hermes_agent_mcp_binary_path }}"
       - config
       - check
   environment:
+    HOME: "{{ hermes_agent_mcp_user_home }}"
     HERMES_HOME: "{{ hermes_agent_mcp_home }}"
   changed_when: false
   when: not ansible_check_mode

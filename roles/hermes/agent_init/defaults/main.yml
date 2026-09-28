@@ -55,6 +55,9 @@ hermes_agent_install_packages_redhat:
   - make
 hermes_agent_install_package_state: present
 
+hermes_agent_manage_model: true
+hermes_agent_manage_telegram: true
+
 hermes_agent_model_provider: "{{ hermes_model_provider | default('custom') }}"
 hermes_agent_model: "{{ hermes_model | default('') }}"
 hermes_agent_model_base_url: "{{ hermes_model_base_url | default('') }}"

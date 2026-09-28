@@ -5,24 +5,26 @@
       - hermes_agent_user | length > 0
       - hermes_agent_user_group | length > 0
       - hermes_agent_user_home | length > 0
-      - hermes_agent_model_provider | length > 0
-      - hermes_agent_model | length > 0
-      - hermes_agent_model_base_url | length > 0
+      - hermes_agent_manage_model is boolean
+      - hermes_agent_manage_telegram is boolean
+      - not hermes_agent_manage_model or hermes_agent_model_provider | length > 0
+      - not hermes_agent_manage_model or hermes_agent_model | length > 0
+      - not hermes_agent_manage_model or hermes_agent_model_base_url | length > 0
       - hermes_agent_model_api_mode is string
       - hermes_agent_reasoning_effort in ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
       - hermes_agent_telegram_enabled is boolean
-      - hermes_agent_telegram_bot_token | length > 0
-      - hermes_agent_telegram_bot_token is not match('^REPLACE_WITH')
+      - not hermes_agent_manage_telegram or hermes_agent_telegram_bot_token | length > 0
+      - not hermes_agent_manage_telegram or hermes_agent_telegram_bot_token is not match('^REPLACE_WITH')
       - hermes_agent_telegram_user_ids is sequence
       - hermes_agent_telegram_user_ids is not string
-      - hermes_agent_telegram_chat_id is match('^-?[0-9]+$')
+      - not hermes_agent_manage_telegram or hermes_agent_telegram_chat_id is match('^-?[0-9]+$')
       - hermes_agent_telegram_require_mention is boolean
       - hermes_agent_onboarding_profile_build in ['ask', 'off']
       - hermes_agent_environment is mapping
       - ansible_facts.os_family in ['Debian', 'RedHat']
     fail_msg: >-
-      Hermes requires a service user, model settings, Telegram credentials and
-      a supported Debian/RedHat Linux host.
+      Hermes requires a service user, a supported Debian/RedHat Linux host, and
+      model/Telegram settings when their management is enabled.
 
 - name: Validate Telegram user IDs
   ansible.builtin.assert:
@@ -32,6 +34,7 @@
   loop: "{{ hermes_agent_telegram_user_ids }}"
   loop_control:
     label: "{{ item }}"
+  when: hermes_agent_manage_telegram
 
 - name: Ensure Hermes service group exists
   become: true
@@ -156,7 +159,6 @@
   environment: "{{ hermes_agent_runtime_environment }}"
   register: hermes_agent_install_result
   when: not ansible_check_mode
-  changed_when: hermes_agent_install_result.rc == 0
   failed_when: hermes_agent_install_result.rc != 0
 
 - name: Verify Hermes launcher exists
