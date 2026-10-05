@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eux
+
+echo "[llama-cpp] Using Hugging Face repo: {{ llama_cpp_hf_model_repo }}"
+{% if llama_cpp_hf_model_file | default('') | trim %}
+echo "[llama-cpp] Using Hugging Face file: {{ llama_cpp_hf_model_file | trim }}"
+{% else %}
+echo "[llama-cpp] Hugging Face file is not specified, llama-server will select default artifact from repo"
+{% endif %}
+{% if llama_cpp_hf_mmproj_file | default('') | trim %}
+echo "[llama-cpp] Using mmproj file: {{ llama_cpp_hf_mmproj_file | trim }}"
+{% endif %}
+
+LLAMA_SERVER_BIN="$(command -v llama-server || true)"
+if [ -z "$LLAMA_SERVER_BIN" ] && [ -x /app/llama-server ]; then
+  LLAMA_SERVER_BIN=/app/llama-server
+fi
+if [ -z "$LLAMA_SERVER_BIN" ] && [ -x /llama-server ]; then
+  LLAMA_SERVER_BIN=/llama-server
+fi
+if [ -z "$LLAMA_SERVER_BIN" ]; then
+  echo "[llama-cpp] ERROR: llama-server binary not found in PATH, /app/llama-server, or /llama-server"
+  exit 1
+fi
+
+exec "$LLAMA_SERVER_BIN" \
+  --hf-repo "{{ llama_cpp_hf_model_repo }}" \
+  --ctx-size "{{ llama_cpp_ctx_size }}" \
+{% if llama_cpp_gpu_layers | default('') | string | trim %}
+  --n-gpu-layers "{{ llama_cpp_gpu_layers }}" \
+{% endif %}
+  --threads "{{ llama_cpp_threads }}" \
+  --batch-size "{{ llama_cpp_batch_size }}" \
+  --ubatch-size "{{ llama_cpp_ubatch_size }}" \
+  --n-predict "{{ llama_cpp_n_predict }}" \
+{% if llama_cpp_draft_model | default('') | trim %}
+  --model-draft "{{ llama_cpp_draft_model | trim }}" \
+{% endif %}
+{% if llama_cpp_additional_options | default('') | trim %}
+  {{ llama_cpp_additional_options }}
+{% else %}
+
+{% endif %}

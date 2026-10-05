@@ -1,0 +1,90 @@
+#!/bin/sh
+set -eu
+
+gpu_count="$(nvidia-smi -L 2>/dev/null | wc -l | tr -d '[:space:]')"
+case "${gpu_count}" in
+  ''|*[!0-9]*|0)
+    echo "Unable to detect visible NVIDIA GPUs" >&2
+    exit 1
+    ;;
+esac
+
+exec {{ vllm_cli_command if vllm_cli_command else 'vllm serve' }} \
+  {{ vllm_model_name }} \
+  --served-model-name {{ vllm_served_model_name if vllm_served_model_name else vllm_model_name }} \
+  --host 0.0.0.0 \
+{% if vllm_ray_enabled %}
+  --distributed-executor-backend ray \
+{% if vllm_ray_extra_args %}
+  {{ vllm_ray_extra_args }} \
+{% endif %}
+{% endif %}
+  --pipeline-parallel-size {{ vllm_pipeline_parallel_size }} \
+  --tensor-parallel-size "${gpu_count}" \
+  --gpu-memory-utilization {{ vllm_gpu_memory_utilization }} \
+{% if vllm_watermark is not none %}
+  --watermark {{ vllm_watermark }} \
+{% endif %}
+{% if vllm_mamba_ssm_cache_dtype is not none %}
+  --mamba-ssm-cache-dtype {{ vllm_mamba_ssm_cache_dtype }} \
+{% endif %}
+{% if vllm_max_num_partial_prefills is not none %}
+  --max-num-partial-prefills {{ vllm_max_num_partial_prefills }} \
+{% endif %}
+{% if vllm_max_long_partial_prefills is not none %}
+  --max-long-partial-prefills {{ vllm_max_long_partial_prefills }} \
+{% endif %}
+{% if vllm_long_prefill_token_threshold is not none %}
+  --long-prefill-token-threshold {{ vllm_long_prefill_token_threshold }} \
+{% endif %}
+{% if vllm_load_format is not none %}
+  --load-format {{ vllm_load_format }} \
+{% endif %}
+{% if vllm_attention_backend is not none %}
+  --attention-backend {{ vllm_attention_backend }} \
+{% endif %}
+{% if vllm_kv_cache_dtype is not none %}
+  --kv-cache-dtype {{ vllm_kv_cache_dtype }} \
+{% endif %}
+{% if vllm_enable_prefix_caching %}
+  --enable-prefix-caching \
+{% endif %}
+{% if vllm_enable_auto_tool_choice %}
+  --enable-auto-tool-choice \
+{% endif %}
+{% if vllm_tool_call_parser is not none %}
+  --tool-call-parser {{ vllm_tool_call_parser }} \
+{% endif %}
+{% if vllm_trust_remote_code %}
+  --trust-remote-code \
+{% endif %}
+{% if vllm_reasoning_parser is not none %}
+  --reasoning-parser {{ vllm_reasoning_parser }} \
+{% endif %}
+{% if vllm_max_model_len is not none %}
+  --max-model-len {{ vllm_max_model_len }} \
+{% endif %}
+{% if vllm_max_num_seqs is not none %}
+  --max-num-seqs {{ vllm_max_num_seqs }} \
+{% endif %}
+{% if vllm_max_num_batched_tokens is not none %}
+  --max-num-batched-tokens {{ vllm_max_num_batched_tokens }} \
+{% endif %}
+{% if vllm_api_key %}
+  --api-key {{ vllm_api_key }} \
+{% endif %}
+{% if vllm_speculative_config %}
+  --speculative-config {{ vllm_speculative_config | quote }} \
+{% endif %}
+{% if vllm_override_generation_config is not none and vllm_override_generation_config | length > 0 %}
+  --override-generation-config {{ vllm_override_generation_config | to_json | quote }} \
+{% endif %}
+{% if vllm_extra_args %}
+  {{ vllm_extra_args }} \
+{% endif %}
+{% if vllm_extra_args_list %}
+{% for arg in vllm_extra_args_list %}
+  {{ arg }} \
+{% endfor %}
+{% endif %}
+  --seed {{ vllm_seed }}

@@ -1,0 +1,42 @@
+services:
+  llama-cpp:
+    container_name: {{ llama_cpp_compose_project_name }}-llama-cpp
+    image: {{ llama_cpp_image }}:{{ llama_cpp_version }}
+{% if llama_cpp_use_gpu %}
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+{% endif %}
+    restart: unless-stopped
+    ports:
+      - {{ llama_cpp_port }}:{{ llama_cpp_port }}
+    env_file:
+      - .env
+    environment:
+      LLAMA_CACHE: {{ llama_cpp_container_models_dir }}
+{% for key, value in (llama_cpp_extra_env | default({})).items() %}
+      {{ key }}: "{{ value }}"
+{% endfor %}
+    volumes:
+      - {{ llama_cpp_host_models_dir }}:{{ llama_cpp_container_models_dir }}
+      - {{ ansible_remote_dir }}/start-llama.sh:/start-llama.sh:ro
+    entrypoint:
+      - /bin/sh
+      - /start-llama.sh
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -fsS "http://localhost:{{ llama_cpp_port }}/health" >/dev/null'
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging:
+      options:
+        max-file: "5"
+        max-size: "20m"

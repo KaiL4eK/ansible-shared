@@ -53,3 +53,7 @@ Before working with this repository, install Ansible dependencies:
   backup repository without overwriting existing data.
 - `roles/nodejs/runtime/` installs Node.js and npm from NodeSource on Debian
   and Ubuntu hosts.
+- `roles/llm/llama-cpp/` deploys a llama.cpp server with Docker Compose,
+  loading a model from a Hugging Face GGUF repository (token optional).
+- `roles/llm/vllm/` deploys a vLLM server with Docker Compose, including
+  optional Ray multi-node setups and `auto` tensor-parallel GPU detection.

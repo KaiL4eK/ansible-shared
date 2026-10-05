@@ -1,0 +1,71 @@
+vllm_model_name: ""
+vllm_served_model_name: ""
+
+vllm_remote_dir: "/home/{{ ansible_user }}/ansible/vllm-{{ vllm_model_name | replace('/', '_') }}"
+vllm_host_huggingface_cache_dir: "/home/{{ ansible_user }}/.cache/huggingface"
+vllm_host_vllm_cache_dir: "{{ vllm_remote_dir }}/cache/vllm"
+vllm_host_triton_cache_dir: "{{ vllm_remote_dir }}/cache/triton"
+vllm_host_flashinfer_cache_dir: "{{ vllm_remote_dir }}/cache/flashinfer"
+vllm_container_models_dir: /var/vllm_models
+
+vllm_port: 8000
+# https://hub.docker.com/r/vllm/vllm-openai/tags
+vllm_image: vllm/vllm-openai
+vllm_version: v0.16.0
+vllm_compose_wait_timeout: 1800
+# vllm/vllm-openai's ENTRYPOINT already runs "vllm serve", so command: starts
+# with the model name. nvcr.io/nvidia/vllm uses the generic NVIDIA container
+# entrypoint (/opt/nvidia/nvidia_entrypoint.sh), which execs command: verbatim
+# without prepending "vllm serve" — set this to "vllm serve" for that image.
+vllm_cli_command: ""
+vllm_gpu_memory_utilization: "0.9"
+vllm_gpu_devices: "all"
+vllm_watermark:
+vllm_mamba_ssm_cache_dtype:
+vllm_max_num_partial_prefills:
+vllm_max_long_partial_prefills:
+vllm_long_prefill_token_threshold:
+vllm_load_format:
+vllm_attention_backend:
+vllm_enable_prefix_caching: false
+vllm_enable_auto_tool_choice: false
+vllm_speculative_config:
+vllm_tool_call_parser:
+vllm_kv_cache_dtype:
+vllm_pull_enabled: true
+vllm_entrypoint_checksum: ""
+
+vllm_extra_env: {}
+
+vllm_trust_remote_code: false
+vllm_reasoning_parser:
+vllm_max_model_len:
+vllm_max_num_seqs:
+vllm_max_num_batched_tokens:
+vllm_pipeline_parallel_size: 1
+# Set to auto to detect the number of visible GPUs when the container starts.
+vllm_tensor_parallel_size: 1
+vllm_extra_args: ""
+vllm_seed: 3407
+vllm_drop_page_cache_before_start: false
+
+vllm_ray_enabled: false
+vllm_ray_address:
+vllm_ray_extra_args: ""
+vllm_ray_host_tmp_dir: "/home/{{ ansible_user }}/ansible/ray-head/tmp/ray"
+vllm_ray_tmpdir: /tmp/ray
+vllm_ray_network_mode:
+vllm_host_ip: "{{ ansible_default_ipv4.address }}"
+vllm_extra_args_list: []
+
+vllm_api_key:
+# Optional; only needed for gated or private Hugging Face repositories.
+vllm_hf_token: ""
+vllm_override_generation_config:
+
+# NVIDIA recommends --ipc=host (or shared /dev/shm) plus raised memlock/stack
+# ulimits for vLLM containers, since the default 64MB Docker shm limit is too
+# small for its inter-process tensor transport. Off by default; enable per
+# deployment via vllm_ipc_host / vllm_ulimits.
+vllm_ipc_host: false
+vllm_ulimits: {}

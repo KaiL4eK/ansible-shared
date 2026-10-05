@@ -1,0 +1,47 @@
+llama_cpp_use_gpu: true
+
+# https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp
+llama_cpp_image: ghcr.io/ggml-org/llama.cpp
+llama_cpp_version: server-cuda
+
+# Set to false when a locally built image is used (e.g. llama.cpp:server-cuda-mtp)
+llama_cpp_pull_enabled: true
+
+llama_cpp_port: 8080
+llama_cpp_host: 0.0.0.0
+# 0 - Full context
+llama_cpp_ctx_size: 0
+llama_cpp_gpu_layers: 999
+# Additional llama-server options, e.g. "--cpu-moe"
+llama_cpp_additional_options: ""
+llama_cpp_threads: 8
+llama_cpp_batch_size: 512
+llama_cpp_ubatch_size: 512
+llama_cpp_n_predict: -1
+
+llama_cpp_hf_model_repo: bartowski/Llama-3.1-8B-Instruct-GGUF
+llama_cpp_hf_model_revision: main
+# Optional; only needed for gated or private Hugging Face repositories.
+llama_cpp_hf_token: ""
+
+# Optional exact model filename from repository for -hf mode.
+# Example: gpt-oss-20b-mxfp4.gguf
+llama_cpp_hf_model_file: ""
+
+# Optional draft model path for speculative decoding (--model-draft).
+# Example: /models/mtp-shared-Q8_0.gguf
+llama_cpp_draft_model: ""
+
+# Extra environment variables for the container.
+# Example: {LLAMA_ATTN_ROT_DISABLE: "1"}
+llama_cpp_extra_env: {}
+
+# Optional mmproj filename/path for multimodal models.
+# Example: unsloth/Qwen3.5-35B-A3B-GGUF/mmproj-F16.gguf
+llama_cpp_hf_mmproj_file: ""
+
+ansible_remote_dir: "/home/{{ ansible_user }}/ansible/llama-cpp-{{ llama_cpp_hf_model_repo | replace('/', '_') | replace(':', '_') }}"
+llama_cpp_compose_project_name: "{{ ansible_remote_dir | basename }}"
+# Keep cache files isolated per deployment under ansible_remote_dir/model
+llama_cpp_host_models_dir: "{{ ansible_remote_dir }}/model"
+llama_cpp_container_models_dir: /models
