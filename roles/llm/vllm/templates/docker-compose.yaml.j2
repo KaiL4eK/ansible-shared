@@ -67,6 +67,9 @@ services:
 {% if vllm_enable_auto_tool_choice %}
       --enable-auto-tool-choice
 {% endif %}
+{% if vllm_enable_prompt_tokens_details %}
+      --enable-prompt-tokens-details
+{% endif %}
 {% if vllm_tool_call_parser is not none %}
       --tool-call-parser {{ vllm_tool_call_parser }}
 {% endif %}

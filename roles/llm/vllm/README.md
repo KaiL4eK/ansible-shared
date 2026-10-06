@@ -22,6 +22,13 @@ vllm_tensor_parallel_size: auto
 When using `auto`, `vllm_gpu_devices` must expose the GPUs that should be used.
 The default value `all` passes all available GPUs to the container.
 
+## Prompt tokens details
+
+`vllm_enable_prompt_tokens_details` defaults to `true` and passes
+`--enable-prompt-tokens-details` to `vllm serve`. This makes the OpenAI API
+report `prompt_tokens_details` (including `cached_tokens`) in the usage stats,
+which is useful for prefix-cache hit monitoring. Set it to `false` to disable.
+
 The following optional variables configure long-prefill scheduling and the
 Mamba SSM cache: `vllm_watermark`, `vllm_mamba_ssm_cache_dtype`,
 `vllm_max_num_partial_prefills`, `vllm_max_long_partial_prefills`, and

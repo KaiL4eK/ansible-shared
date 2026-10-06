@@ -27,8 +27,9 @@ vllm_max_long_partial_prefills:
 vllm_long_prefill_token_threshold:
 vllm_load_format:
 vllm_attention_backend:
-vllm_enable_prefix_caching: false
+vllm_enable_prefix_caching: true
 vllm_enable_auto_tool_choice: false
+vllm_enable_prompt_tokens_details: true
 vllm_speculative_config:
 vllm_tool_call_parser:
 vllm_kv_cache_dtype:
