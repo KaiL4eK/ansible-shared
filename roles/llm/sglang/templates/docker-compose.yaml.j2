@@ -1,0 +1,64 @@
+services:
+  sglang:
+    image: {{ sglang_image }}:{{ sglang_version }}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: {{ sglang_gpu_devices_normalized | to_json }}
+{% for env_name, env_value in sglang_extra_env.items() %}
+{% if env_name != 'NVIDIA_VISIBLE_DEVICES' %}
+      {{ env_name }}: {{ env_value | to_json }}
+{% endif %}
+{% endfor %}
+    command: >-
+      sglang serve
+      --model-path {{ sglang_model_name }}
+      --served-model-name {{ sglang_served_model_name if sglang_served_model_name else sglang_model_name }}
+      --host 0.0.0.0
+      --port {{ sglang_container_port }}
+      --tp-size {{ sglang_tp_size }}
+{% if sglang_context_length is not none %}
+      --context-length {{ sglang_context_length }}
+{% endif %}
+{% if sglang_mem_fraction_static is not none %}
+      --mem-fraction-static {{ sglang_mem_fraction_static }}
+{% endif %}
+{% if sglang_trust_remote_code %}
+      --trust-remote-code
+{% endif %}
+{% if sglang_tool_call_parser is not none %}
+      --tool-call-parser {{ sglang_tool_call_parser }}
+{% endif %}
+{% if sglang_reasoning_parser is not none %}
+      --reasoning-parser {{ sglang_reasoning_parser }}
+{% endif %}
+{% if sglang_extra_args %}
+      {{ sglang_extra_args }}
+{% endif %}
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: {{ sglang_gpu_count }}
+              capabilities: [gpu]
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - {{ sglang_port }}:{{ sglang_container_port }}
+    env_file:
+      - .env
+    volumes:
+      - {{ sglang_host_huggingface_cache_dir }}:/root/.cache/huggingface
+      - {{ sglang_host_cache_dir }}:/root/.cache/sglang
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -fsS "http://localhost:{{ sglang_container_port }}/v1/models" >/dev/null'
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    logging:
+      options:
+        max-file: "5"
+        max-size: "20m"
