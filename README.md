@@ -31,6 +31,9 @@ Before working with this repository, install Ansible dependencies:
 - `roles/docker/nfs-server/` provides a shared Docker-based NFS server role.
 - `roles/docker/engine/` устанавливает Docker Engine и Docker Compose и
   управляет доступом к группе `docker`.
+- `roles/k8s/postgresql/` deploys PostgreSQL to Kubernetes via the Bitnami
+  Helm chart (fixed chart and image versions, optional metrics sidecar with
+  ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user

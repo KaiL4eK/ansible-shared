@@ -1,0 +1,108 @@
+---
+- name: Validate PostgreSQL role inputs
+  ansible.builtin.assert:
+    that:
+      - k8s_postgresql_namespace | length > 0
+      - k8s_postgresql_release_name | length > 0
+      - k8s_postgresql_chart_version | length > 0
+      - k8s_postgresql_admin_password | length > 0
+      - k8s_postgresql_image_values is mapping
+      - k8s_postgresql_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
+      - k8s_postgresql_resources is mapping
+      - k8s_postgresql_resources | length == 0 or k8s_postgresql_resources.keys() | intersect(['requests', 'limits']) | length > 0
+      - k8s_postgresql_storage_class is string
+      - k8s_postgresql_storage_size | length > 0
+      - k8s_postgresql_persistence_access_modes is sequence
+      - k8s_postgresql_node_selector is mapping
+      - k8s_postgresql_service_type in ['ClusterIP', 'NodePort', 'LoadBalancer']
+      - k8s_postgresql_service_type != 'NodePort' or k8s_postgresql_node_port | int > 0
+      - k8s_postgresql_metrics_enabled | type_debug == 'bool'
+      - k8s_postgresql_metrics_image_values is mapping
+      - k8s_postgresql_metrics_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
+      - k8s_postgresql_metrics_resources is mapping
+      - k8s_postgresql_metrics_resources | length == 0 or k8s_postgresql_metrics_resources.keys() | intersect(['requests', 'limits']) | length > 0
+      - k8s_postgresql_metrics_service_monitor_enabled | type_debug == 'bool'
+      - k8s_postgresql_metrics_service_monitor_labels is mapping
+      - k8s_postgresql_extended_conf is mapping
+      - k8s_postgresql_shared_preload_libraries is string
+      - k8s_postgresql_extensions is sequence
+      - k8s_postgresql_extensions | select('match', '^[a-z_][a-z0-9_]*$') | list | length == k8s_postgresql_extensions | length
+    fail_msg: >-
+      PostgreSQL requires a namespace, fixed chart version, admin password,
+      persistent storage settings and a valid service configuration.
+
+- name: Install or upgrade PostgreSQL
+  no_log: true
+  vars:
+    # Пустое значение отключило бы pgaudit (дефолт чарта), поэтому откатываемся к нему.
+    _k8s_postgresql_shared_preload_libraries: >-
+      {{ k8s_postgresql_shared_preload_libraries if (k8s_postgresql_shared_preload_libraries | length > 0)
+         else 'pgaudit' }}
+  kubernetes.core.helm:
+    name: "{{ k8s_postgresql_release_name }}"
+    chart_ref: "{{ k8s_postgresql_chart_ref }}"
+    chart_version: "{{ k8s_postgresql_chart_version }}"
+    release_namespace: "{{ k8s_postgresql_namespace }}"
+    create_namespace: "{{ k8s_postgresql_create_namespace | bool }}"
+    release_state: present
+    atomic: "{{ k8s_postgresql_atomic | bool }}"
+    wait: "{{ k8s_postgresql_wait | bool }}"
+    take_ownership: "{{ k8s_postgresql_take_ownership | bool }}"
+    timeout: "{{ k8s_postgresql_timeout }}"
+    values:
+      image: "{{ k8s_postgresql_image_values }}"
+      auth:
+        enablePostgresUser: "{{ k8s_postgresql_enable_postgres_user | bool }}"
+        postgresPassword: "{{ k8s_postgresql_admin_password }}"
+      postgresqlSharedPreloadLibraries: "{{ _k8s_postgresql_shared_preload_libraries }}"
+      postgresqlExtendedConf: "{{ k8s_postgresql_extended_conf }}"
+      primary:
+        resourcesPreset: "{{ 'none' if (k8s_postgresql_resources | length > 0) else k8s_postgresql_resources_preset }}"
+        resources: "{{ k8s_postgresql_resources }}"
+        nodeSelector: "{{ k8s_postgresql_node_selector }}"
+        persistence:
+          enabled: "{{ k8s_postgresql_persistence_enabled | bool }}"
+          storageClass: "{{ k8s_postgresql_storage_class }}"
+          size: "{{ k8s_postgresql_storage_size }}"
+          accessModes: "{{ k8s_postgresql_persistence_access_modes }}"
+        service:
+          type: "{{ k8s_postgresql_service_type }}"
+          nodePorts:
+            postgresql: "{{ k8s_postgresql_node_port }}"
+      metrics:
+        enabled: "{{ k8s_postgresql_metrics_enabled | bool }}"
+        image: "{{ k8s_postgresql_metrics_image_values }}"
+        resourcesPreset: "{{ 'none' if (k8s_postgresql_metrics_resources | length > 0) else k8s_postgresql_metrics_resources_preset }}"
+        resources: "{{ k8s_postgresql_metrics_resources }}"
+        serviceMonitor:
+          enabled: "{{ k8s_postgresql_metrics_service_monitor_enabled | bool }}"
+          interval: "{{ k8s_postgresql_metrics_service_monitor_interval }}"
+          scrapeTimeout: "{{ k8s_postgresql_metrics_service_monitor_scrape_timeout }}"
+          labels: "{{ k8s_postgresql_metrics_service_monitor_labels }}"
+
+- name: List PostgreSQL user databases for extensions
+  when: k8s_postgresql_extensions | length > 0
+  kubernetes.core.k8s_exec:
+    namespace: "{{ k8s_postgresql_namespace }}"
+    pod: "{{ k8s_postgresql_release_name }}-0"
+    container: postgresql
+    command: >-
+      sh -c 'PGPASSWORD=$(cat "$POSTGRES_PASSWORD_FILE") psql -U postgres -tAc
+      "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate"'
+  register: k8s_postgresql_user_databases
+  changed_when: false
+
+- name: Create PostgreSQL extensions in user databases
+  when: k8s_postgresql_extensions | length > 0
+  loop: "{{ k8s_postgresql_user_databases.stdout_lines | product(k8s_postgresql_extensions) | list }}"
+  loop_control:
+    label: "{{ item.1 }} @ {{ item.0 }}"
+  kubernetes.core.k8s_exec:
+    namespace: "{{ k8s_postgresql_namespace }}"
+    pod: "{{ k8s_postgresql_release_name }}-0"
+    container: postgresql
+    command: >-
+      sh -c 'PGPASSWORD=$(cat "$POSTGRES_PASSWORD_FILE") psql -U postgres -d "{{ item.0 }}" -tAc
+      "CREATE EXTENSION IF NOT EXISTS {{ item.1 }}"'
+  register: k8s_postgresql_extension_result
+  changed_when: "'already exists' not in (k8s_postgresql_extension_result.stderr | default(''))"
