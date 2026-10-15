@@ -9,6 +9,11 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 - `roles/` contains shared roles grouped by domain.
 - `.agents/skills/ansible-role/SKILL.md` contains the detailed role implementation workflow.
 - `requirements.yml` defines role and collection dependencies for this repository.
+- `roles/hermes/kubeconfig/` installs an explicitly supplied controller-side
+  kubeconfig for an existing managed-host user. Inputs are
+  `hermes_kubeconfig_source` (required absolute path), `hermes_kubeconfig_user`
+  (`hermes`), `hermes_kubeconfig_group` (defaults to that user), and
+  `hermes_kubeconfig_user_home` (`/home/<user>`).
 
 ## Working Rules
 
@@ -17,6 +22,16 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 - Keep deployment-specific values outside roles and pass them in explicitly from the consumer.
 - Keep external dependencies declared in `requirements.yml`.
 - Do not add environment-specific playbooks, inventory, or vault content here.
+- For HomeLab consumers, controller-side kubeconfig sources must come only from
+  the parent project's `kubeconfigs/`; never discover fallback credentials in
+  controller `~/.kube/config` or `/etc/kubernetes/`. The explicitly permitted
+  managed-host destination `{{ hermes_kubeconfig_user_home }}/.kube/config`
+  is not a controller source. Keep selection and access generation in consumer
+  playbooks, not the shared role.
+- Preserve the kubeconfig role's credential handling: directory `0700`, file
+  `0600`, selected user/group ownership, no credential logs or diffs, replacement
+  without merge or backups. Do not install kubectl, alter environment overrides,
+  generate credentials, call the Kubernetes API, or restart Hermes in this role.
 
 ## Validation
 

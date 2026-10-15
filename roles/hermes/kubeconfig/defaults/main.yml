@@ -1,0 +1,5 @@
+---
+hermes_kubeconfig_source: ""
+hermes_kubeconfig_user: hermes
+hermes_kubeconfig_group: "{{ hermes_kubeconfig_user }}"
+hermes_kubeconfig_user_home: "/home/{{ hermes_kubeconfig_user }}"
