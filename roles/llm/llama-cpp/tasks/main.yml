@@ -1,0 +1,61 @@
+- name: Ensure working dir exists
+  file:
+    path: "{{ ansible_remote_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure local model dir exists
+  file:
+    path: "{{ llama_cpp_host_models_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Validate Hugging Face variables
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_hf_model_repo is defined
+      - llama_cpp_hf_model_repo | length > 0
+    fail_msg: "llama_cpp_hf_model_repo must be set"
+
+- name: Create .env file
+  template:
+    src: .env.j2
+    dest: "{{ ansible_remote_dir }}/.env"
+    mode: '0600'
+
+- name: Create docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ ansible_remote_dir }}/docker-compose.yml"
+
+- name: Create llama-cpp start script
+  template:
+    src: start-llama.sh.j2
+    dest: "{{ ansible_remote_dir }}/start-llama.sh"
+    mode: '0755'
+
+- name: Pull images
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ ansible_remote_dir }}"
+  when: llama_cpp_pull_enabled | default(true)
+
+- name: Stop docker compose project before start (force clean restart)
+  community.docker.docker_compose_v2:
+    project_src: "{{ ansible_remote_dir }}"
+    state: stopped
+    remove_orphans: true
+
+- name: Start llama-cpp service over Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ ansible_remote_dir }}"
+    pull: missing
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+
+- name: Show deployment info
+  debug:
+    msg: |
+      llama.cpp is deployed on http://{{ ansible_default_ipv4.address }}:{{ llama_cpp_port }}
+      Model repo: {{ llama_cpp_hf_model_repo }}

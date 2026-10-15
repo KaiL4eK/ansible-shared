@@ -1,0 +1,25 @@
+sglang_model_name: ""
+sglang_served_model_name: ""
+
+sglang_remote_dir: "/home/{{ ansible_user }}/ansible/sglang-{{ sglang_model_name | replace('/', '_') }}"
+sglang_host_huggingface_cache_dir: "/home/{{ ansible_user }}/.cache/huggingface"
+sglang_host_cache_dir: "{{ sglang_remote_dir }}/cache/sglang"
+
+sglang_port: 8080
+sglang_container_port: 30000
+# https://hub.docker.com/r/lmsysorg/sglang/tags
+sglang_image: lmsysorg/sglang
+sglang_version: latest
+sglang_gpu_devices: "all"
+sglang_tp_size: 1
+sglang_context_length:
+sglang_mem_fraction_static:
+sglang_tool_call_parser:
+sglang_reasoning_parser:
+sglang_trust_remote_code: false
+sglang_pull_enabled: true
+sglang_extra_args: ""
+sglang_extra_env: {}
+
+# Optional; only needed for gated or private Hugging Face repositories.
+sglang_hf_token: ""

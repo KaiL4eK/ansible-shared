@@ -1,0 +1,117 @@
+- name: Ensure required directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ vllm_remote_dir }}"
+    - "{{ vllm_host_huggingface_cache_dir }}"
+    - "{{ vllm_host_vllm_cache_dir }}"
+    - "{{ vllm_host_triton_cache_dir }}"
+    - "{{ vllm_host_flashinfer_cache_dir }}"
+
+- name: Validate Ray configuration
+  ansible.builtin.assert:
+    that:
+      - vllm_ray_address is not none
+      - vllm_ray_address | length > 0
+      - vllm_ray_host_tmp_dir is not none
+      - vllm_ray_host_tmp_dir | length > 0
+      - vllm_host_ip is not none
+      - vllm_host_ip | length > 0
+    fail_msg: "vllm_ray_enabled=true требует vllm_ray_address, vllm_ray_host_tmp_dir и vllm_host_ip"
+  when: vllm_ray_enabled | bool
+
+- name: Normalize GPU devices selector
+  ansible.builtin.set_fact:
+    vllm_gpu_devices_normalized: "{{ (vllm_gpu_devices | string) | regex_replace('\\s+', '') }}"
+
+- name: Validate GPU devices selector
+  ansible.builtin.assert:
+    that:
+      - vllm_gpu_devices_normalized | length > 0
+      - vllm_gpu_devices_normalized == 'all' or (vllm_gpu_devices_normalized is match('^[0-9]+(,[0-9]+)*$'))
+    fail_msg: "vllm_gpu_devices должен быть 'all' или списком индексов GPU через запятую, например '1,2,3'"
+
+- name: Calculate GPU count for Docker Compose reservation
+  ansible.builtin.set_fact:
+    vllm_gpu_count: "{{ 'all' if vllm_gpu_devices_normalized == 'all' else (vllm_gpu_devices_normalized.split(',') | length) }}"
+
+- name: Ensure Ray tmp directory exists for vLLM
+  ansible.builtin.file:
+    path: "{{ vllm_ray_host_tmp_dir }}"
+    state: directory
+    mode: '0755'
+  when: vllm_ray_enabled | bool
+
+- name: Validate pipeline parallel size
+  ansible.builtin.assert:
+    that:
+      - (vllm_pipeline_parallel_size | int) >= 1
+    fail_msg: "vllm_pipeline_parallel_size должен быть >= 1"
+
+- name: Validate tensor parallel size
+  ansible.builtin.assert:
+    that:
+      - >-
+        vllm_tensor_parallel_size == 'auto' or
+        (vllm_tensor_parallel_size is integer and vllm_tensor_parallel_size >= 1)
+    fail_msg: "vllm_tensor_parallel_size должен быть 'auto' или целым числом >= 1"
+
+- name: Validate Docker Compose wait timeout
+  ansible.builtin.assert:
+    that:
+      - (vllm_compose_wait_timeout | int) >= 1
+    fail_msg: "vllm_compose_wait_timeout должен быть >= 1"
+
+- name: Create .env file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ vllm_remote_dir }}/.env"
+    mode: '0600'
+
+- name: Create dynamic GPU entrypoint
+  ansible.builtin.template:
+    src: vllm-entrypoint.sh.j2
+    dest: "{{ vllm_remote_dir }}/vllm-entrypoint.sh"
+    mode: '0755'
+  when: vllm_tensor_parallel_size == 'auto'
+
+- name: Calculate dynamic GPU entrypoint checksum
+  ansible.builtin.set_fact:
+    vllm_entrypoint_checksum: "{{ lookup('ansible.builtin.template', 'vllm-entrypoint.sh.j2') | hash('sha256') }}"
+  when: vllm_tensor_parallel_size == 'auto'
+
+- name: Create docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yaml.j2
+    dest: "{{ vllm_remote_dir }}/docker-compose.yaml"
+    mode: '0644'
+
+- name: Pull containers
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ vllm_remote_dir }}"
+  when: vllm_pull_enabled | bool
+
+- name: Drop Linux page cache before container startup
+  become: true
+  ansible.builtin.command:
+    cmd: sh -c "sync; echo 3 > /proc/sys/vm/drop_caches"
+  changed_when: false
+  when: vllm_drop_page_cache_before_start | bool
+
+- name: Start stack over Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ vllm_remote_dir }}"
+    pull: missing
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+    wait_timeout: "{{ vllm_compose_wait_timeout }}"
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      vLLM is deployed on http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}
+      Docs address http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}/docs

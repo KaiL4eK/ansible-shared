@@ -1,0 +1,62 @@
+- name: Ensure required directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ sglang_remote_dir }}"
+    - "{{ sglang_host_huggingface_cache_dir }}"
+    - "{{ sglang_host_cache_dir }}"
+
+- name: Normalize GPU devices selector
+  ansible.builtin.set_fact:
+    sglang_gpu_devices_normalized: "{{ (sglang_gpu_devices | string) | regex_replace('\\s+', '') }}"
+
+- name: Validate GPU devices selector
+  ansible.builtin.assert:
+    that:
+      - sglang_gpu_devices_normalized | length > 0
+      - sglang_gpu_devices_normalized == 'all' or (sglang_gpu_devices_normalized is match('^[0-9]+(,[0-9]+)*$'))
+    fail_msg: "sglang_gpu_devices должен быть 'all' или списком индексов GPU через запятую, например '1,2,3'"
+
+- name: Calculate GPU count for Docker Compose reservation
+  ansible.builtin.set_fact:
+    sglang_gpu_count: "{{ 'all' if sglang_gpu_devices_normalized == 'all' else (sglang_gpu_devices_normalized.split(',') | length) }}"
+
+- name: Validate tensor parallel size
+  ansible.builtin.assert:
+    that:
+      - (sglang_tp_size | int) >= 1
+    fail_msg: "sglang_tp_size должен быть >= 1"
+
+- name: Create .env file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ sglang_remote_dir }}/.env"
+    mode: '0600'
+
+- name: Create docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yaml.j2
+    dest: "{{ sglang_remote_dir }}/docker-compose.yaml"
+    mode: '0644'
+
+- name: Pull containers
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ sglang_remote_dir }}"
+  when: sglang_pull_enabled | bool
+
+- name: Start stack over Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ sglang_remote_dir }}"
+    pull: "{{ 'missing' if (sglang_pull_enabled | bool) else 'never' }}"
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      SGLang is deployed on http://{{ ansible_default_ipv4.address }}:{{ sglang_port }}
+      API models endpoint http://{{ ansible_default_ipv4.address }}:{{ sglang_port }}/v1/models
