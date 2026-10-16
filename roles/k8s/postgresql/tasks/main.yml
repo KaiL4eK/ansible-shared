@@ -38,6 +38,13 @@
     _k8s_postgresql_shared_preload_libraries: >-
       {{ k8s_postgresql_shared_preload_libraries if (k8s_postgresql_shared_preload_libraries | length > 0)
          else 'pgaudit' }}
+    # Map из плейбука → построчный конфиг "key = value" (одна директива на строку —
+    # формат postgresql.conf). ВАЖНО: join('\n') здесь нельзя — Jinja в Ansible
+    # не интерпретирует \n в строковых литералах, получится буквальный текст "\n".
+    _k8s_postgresql_extended_conf: |-
+      {%- for kv in k8s_postgresql_extended_conf | dict2items -%}
+      {{ kv.key }} = {{ kv.value }}
+      {% endfor %}
   kubernetes.core.helm:
     name: "{{ k8s_postgresql_release_name }}"
     chart_ref: "{{ k8s_postgresql_chart_ref }}"
@@ -55,8 +62,13 @@
         enablePostgresUser: "{{ k8s_postgresql_enable_postgres_user | bool }}"
         postgresPassword: "{{ k8s_postgresql_admin_password }}"
       postgresqlSharedPreloadLibraries: "{{ _k8s_postgresql_shared_preload_libraries }}"
-      postgresqlExtendedConf: "{{ k8s_postgresql_extended_conf }}"
       primary:
+        # Начиная с major-рефакторинга чарта (13.x) параметр top-level
+        # postgresqlExtendedConf удалён: extended-конфиг задаётся строкой
+        # "key = value" через primary.extendedConfiguration (ConfigMap
+        # <release>-extended-configuration → override.conf в поде). Неизвестный
+        # ключ Helm игнорирует молча — параметры БД не применились бы вообще.
+        extendedConfiguration: "{{ _k8s_postgresql_extended_conf }}"
         resourcesPreset: "{{ 'none' if (k8s_postgresql_resources | length > 0) else k8s_postgresql_resources_preset }}"
         resources: "{{ k8s_postgresql_resources }}"
         nodeSelector: "{{ k8s_postgresql_node_selector }}"

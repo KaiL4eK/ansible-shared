@@ -21,8 +21,11 @@ k8s_postgresql_node_selector: {}
 k8s_postgresql_service_type: NodePort
 k8s_postgresql_node_port: 30432
 
-# --- Конфигурация СУБД: прокидывается в postgresqlExtendedConf чарта (override.conf) ---
-# Ключи/значения — как в postgresql.conf; часть применяется только после рестарта поды.
+# --- Конфигурация СУБД: map "параметр: значение" → primary.extendedConfiguration
+# чарта (построчно "key = value" → ConfigMap <release>-extended-configuration →
+# override.conf в поде). Топ-левел postgresqlExtendedConf из чарта удалён
+# (major-рефакторинг 13.x) и молча игнорируется Helm'ом — не использовать.
+# Часть параметров применяется только после рестарта поды.
 k8s_postgresql_extended_conf: {}
 
 # shared_preload_libraries (через запятую). Пустая строка — используем дефолт
