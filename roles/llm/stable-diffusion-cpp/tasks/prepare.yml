@@ -1,0 +1,126 @@
+---
+- name: Validate service configuration
+  ansible.builtin.assert:
+    that:
+      - sdcpp_remote_dir is string and sdcpp_remote_dir is match('^/')
+      - sdcpp_revision is string and sdcpp_revision is match('^[a-f0-9]{40}$')
+      - sdcpp_cuda_architectures is not none
+      - sdcpp_cuda_architectures | string | length > 0
+      - sdcpp_build_parallelism | int > 0
+      - sdcpp_port | int > 0 and sdcpp_port | int < 65536
+      - sdcpp_compose_wait_timeout | int > 0
+      - sdcpp_models | length > 0
+      - sdcpp_diffusion_model_file is string
+      - sdcpp_text_encoder_file is string
+      - sdcpp_vae_file is string
+      - sdcpp_diffusion_model_file in (sdcpp_models | map(attribute='file') | map('basename') | list)
+      - sdcpp_text_encoder_file in (sdcpp_models | map(attribute='file') | map('basename') | list)
+      - sdcpp_vae_file in (sdcpp_models | map(attribute='file') | map('basename') | list)
+      - >-
+        (sdcpp_models | map(attribute='file') | map('basename') | unique | length)
+        == (sdcpp_models | length)
+    fail_msg: "Provide an absolute directory, pinned source, CUDA target and model components."
+
+- name: Validate requested host architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture == sdcpp_required_architecture
+    fail_msg: "Host architecture does not match the requested build target."
+  when: sdcpp_required_architecture is not none
+
+- name: Validate bearer API key
+  ansible.builtin.assert:
+    that:
+      - sdcpp_api_key is string
+      - sdcpp_api_key is match('^[A-Za-z0-9_-]+$')
+    fail_msg: "An nginx-safe bearer API key is required."
+  no_log: true
+  when: sdcpp_auth_enabled | bool
+
+- name: Validate pinned model downloads
+  ansible.builtin.assert:
+    that:
+      - item.repo is string and item.repo | length > 0
+      - item.revision is match('^[a-f0-9]{40}$')
+      - item.file is string and item.file | length > 0
+      - item.sha256 is match('^[a-f0-9]{64}$')
+  loop: "{{ sdcpp_models }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: Create service directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ sdcpp_remote_dir }}"
+    - "{{ sdcpp_remote_dir }}/models"
+
+- name: Check out pinned stable-diffusion.cpp source
+  ansible.builtin.git:
+    repo: "{{ sdcpp_source_repo }}"
+    dest: "{{ sdcpp_remote_dir }}/src"
+    version: "{{ sdcpp_revision }}"
+    recursive: true
+  register: sdcpp_source_checkout
+
+- name: Write CUDA Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ sdcpp_remote_dir }}/Dockerfile"
+    mode: "0644"
+  register: sdcpp_build_config
+
+- name: Select source and build-specific image
+  ansible.builtin.set_fact:
+    sdcpp_effective_image: >-
+      {{ sdcpp_image if sdcpp_image else
+         'local/sdcpp:' ~ sdcpp_revision[:12] ~ '-' ~ sdcpp_build_config.checksum[:12] }}
+
+- name: Build sd-server image
+  community.docker.docker_image_build:
+    name: "{{ sdcpp_effective_image }}"
+    path: "{{ sdcpp_remote_dir }}/src"
+    dockerfile: ../Dockerfile
+    rebuild: >-
+      {{ 'always' if sdcpp_image and
+         (sdcpp_build_config.changed or sdcpp_source_checkout.changed) else 'never' }}
+
+- name: Download pinned model components and verify checksums
+  ansible.builtin.get_url:
+    url: "https://huggingface.co/{{ item.repo }}/resolve/{{ item.revision }}/{{ item.file }}"
+    dest: "{{ sdcpp_remote_dir }}/models/{{ item.file | basename }}"
+    checksum: "sha256:{{ item.sha256 }}"
+    timeout: 120
+    mode: "0644"
+  loop: "{{ sdcpp_models }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: Write authenticated API proxy configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ sdcpp_remote_dir }}/nginx.conf"
+    mode: "0600"
+  register: sdcpp_api_config
+  no_log: true
+  when: sdcpp_auth_enabled | bool
+
+- name: Remove unused API proxy configuration
+  ansible.builtin.file:
+    path: "{{ sdcpp_remote_dir }}/nginx.conf"
+    state: absent
+  when: not (sdcpp_auth_enabled | bool)
+
+- name: Write image generation Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ sdcpp_remote_dir }}/compose.yaml"
+    mode: "0644"
+
+- name: Pull API proxy image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ sdcpp_remote_dir }}"
+    services: [api]
+  when: sdcpp_auth_enabled | bool

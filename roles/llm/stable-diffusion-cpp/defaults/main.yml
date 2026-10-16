@@ -1,0 +1,25 @@
+---
+sdcpp_remote_dir: null
+sdcpp_source_repo: https://github.com/leejet/stable-diffusion.cpp.git
+sdcpp_revision: null
+sdcpp_required_architecture: null
+sdcpp_cuda_architectures: null
+sdcpp_cuda_version: 13.0.2
+sdcpp_build_parallelism: 2
+# Optional explicit image name; otherwise derive it from source and Dockerfile.
+sdcpp_image: null
+sdcpp_api_image: nginx:1.28-alpine
+sdcpp_port: 8080
+sdcpp_auth_enabled: true
+sdcpp_api_key: null
+sdcpp_models: []
+sdcpp_diffusion_model_file: null
+sdcpp_text_encoder_file: null
+sdcpp_vae_file: null
+sdcpp_extra_args: []
+sdcpp_compose_wait_timeout: 1800
+# Internal state shared by the prepare/start entrypoints.
+sdcpp_build_config: {}
+sdcpp_source_checkout: {}
+sdcpp_api_config: {}
+sdcpp_effective_image: null

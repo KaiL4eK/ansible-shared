@@ -57,3 +57,5 @@ Before working with this repository, install Ansible dependencies:
   loading a model from a Hugging Face GGUF repository (token optional).
 - `roles/llm/vllm/` deploys a vLLM server with Docker Compose, including
   optional Ray multi-node setups and `auto` tensor-parallel GPU detection.
+- `roles/llm/stable-diffusion-cpp/` builds a pinned CUDA sd-server and serves
+  GGUF diffusion models through a bearer-authenticated Docker Compose API.

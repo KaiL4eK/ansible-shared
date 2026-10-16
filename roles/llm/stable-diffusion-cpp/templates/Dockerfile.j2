@@ -1,0 +1,14 @@
+FROM nvidia/cuda:{{ sdcpp_cuda_version }}-devel-ubuntu24.04 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN cmake -S . -B build -DSD_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES={{ sdcpp_cuda_architectures | quote }} \
+    -DCMAKE_BUILD_TYPE=Release -DSD_SERVER_BUILD_FRONTEND=OFF \
+    -DGGML_NATIVE=OFF -DSD_WEBP=OFF -DSD_WEBM=OFF && \
+    cmake --build build --target sd-server --parallel {{ sdcpp_build_parallelism }}
+FROM nvidia/cuda:{{ sdcpp_cuda_version }}-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 curl && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/build/bin/sd-server /usr/local/bin/sd-server
+ENTRYPOINT ["/usr/local/bin/sd-server"]

@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: sdcpp
+  author: Alexey Devyatkin
+  description: CUDA sd-server with pinned GGUF models and a bearer-authenticated API
+  license: MIT
+  min_ansible_version: "2.17"
+dependencies: []

@@ -1,0 +1,6 @@
+---
+- name: Prepare image generation service
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Start image generation service
+  ansible.builtin.import_tasks: start.yml

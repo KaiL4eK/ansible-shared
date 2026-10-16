@@ -1,0 +1,54 @@
+services:
+  sd-server:
+    image: {{ sdcpp_effective_image | to_json }}
+    init: true
+    restart: unless-stopped
+    # Inference is serialized.
+    command: {{ (['--diffusion-model', '/models/' ~ sdcpp_diffusion_model_file, '--llm', '/models/' ~ sdcpp_text_encoder_file, '--vae', '/models/' ~ sdcpp_vae_file, '--listen-ip', '0.0.0.0', '--listen-port', '8000'] + sdcpp_extra_args) | to_json }}
+{% if not (sdcpp_auth_enabled | bool) %}
+    ports:
+      - {{ (sdcpp_port | string ~ ':8000') | to_json }}
+{% endif %}
+    volumes:
+      - {{ (sdcpp_remote_dir ~ '/models:/models:ro') | to_json }}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8000/v1/models]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 10m
+    logging:
+      options:
+        max-file: "5"
+        max-size: 20m
+{% if sdcpp_auth_enabled | bool %}
+  api:
+    image: {{ sdcpp_api_image | to_json }}
+    restart: unless-stopped
+    ports:
+      - {{ (sdcpp_port | string ~ ':8000') | to_json }}
+    volumes:
+      - {{ (sdcpp_remote_dir ~ '/nginx.conf:/etc/nginx/nginx.conf:ro') | to_json }}
+    # A changed configuration recreates the proxy; no restart handler is needed.
+    labels:
+      sdcpp-api-config-checksum: {{ sdcpp_api_config.checksum | to_json }}
+    depends_on:
+      sd-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8000/health]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      options:
+        max-file: "5"
+        max-size: 20m
+{% endif %}

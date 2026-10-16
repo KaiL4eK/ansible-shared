@@ -1,0 +1,18 @@
+---
+- name: Validate prepared service
+  ansible.builtin.assert:
+    that:
+      - sdcpp_remote_dir is string
+      - sdcpp_effective_image is string
+      - sdcpp_effective_image | length > 0
+    fail_msg: "Run the prepare entrypoint before start."
+
+- name: Start authenticated image generation API
+  community.docker.docker_compose_v2:
+    project_src: "{{ sdcpp_remote_dir }}"
+    state: present
+    pull: never
+    build: never
+    remove_orphans: true
+    wait: true
+    wait_timeout: "{{ sdcpp_compose_wait_timeout }}"

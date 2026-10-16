@@ -1,0 +1,26 @@
+events {}
+http {
+{% if sdcpp_auth_enabled | bool %}
+  map_hash_bucket_size 128;
+  map $http_authorization $authorized {
+    default 0;
+    "Bearer {{ sdcpp_api_key }}" 1;
+  }
+{% endif %}
+  server {
+    listen 8000;
+    client_max_body_size 32m;
+    location = /health {
+      proxy_pass http://sd-server:8000/v1/models;
+    }
+    location / {
+{% if sdcpp_auth_enabled | bool %}
+      if ($authorized = 0) { return 401; }
+{% endif %}
+      proxy_pass http://sd-server:8000;
+      proxy_read_timeout 1800s;
+      proxy_send_timeout 1800s;
+      proxy_buffering off;
+    }
+  }
+}
