@@ -1,0 +1,124 @@
+---
+bifrost_llm_proxy_chart_repo_name: bifrost
+bifrost_llm_proxy_chart_repo_url: https://maximhq.github.io/bifrost/helm-charts
+bifrost_llm_proxy_chart_name: bifrost/bifrost
+bifrost_llm_proxy_chart_version: ""
+
+bifrost_llm_proxy_release_name: bifrost-llm-proxy
+bifrost_llm_proxy_namespace: default
+bifrost_llm_proxy_create_namespace: true
+
+bifrost_llm_proxy_replica_count: 1
+bifrost_llm_proxy_image_tag: ""
+bifrost_llm_proxy_image_pull_policy: IfNotPresent
+
+# Zero-downtime rollout: bring up the new pod and wait for it to pass the
+# readiness probe before terminating the old one (surge-only, no gap in
+# availability). Rendered verbatim into the Deployment's spec.strategy.
+bifrost_llm_proxy_strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+bifrost_llm_proxy_service_port: 8080
+bifrost_llm_proxy_service_type: ClusterIP
+bifrost_llm_proxy_service_node_port_http: null
+
+bifrost_llm_proxy_auth_enabled: false
+bifrost_llm_proxy_auth_admin_user: admin
+bifrost_llm_proxy_auth_admin_password: changeme
+bifrost_llm_proxy_auth_disable_auth_on_inference: true
+
+bifrost_llm_proxy_node_selector: {}
+bifrost_llm_proxy_tolerations: []
+
+bifrost_llm_proxy_resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+bifrost_llm_proxy_liveness_probe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+bifrost_llm_proxy_readiness_probe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+bifrost_llm_proxy_postgres_enabled: true
+bifrost_llm_proxy_postgres_host: postgresql.service.svc.cluster.local
+bifrost_llm_proxy_postgres_port: 5432
+bifrost_llm_proxy_postgres_db: bifrost-llm-proxy
+bifrost_llm_proxy_postgres_user: bifrost-llm-proxy
+bifrost_llm_proxy_postgres_password: changeme
+
+bifrost_llm_proxy_ingress_enabled: true
+bifrost_llm_proxy_ingress_host: llm-proxy-mllab.wavea.cc
+bifrost_llm_proxy_ingress_class_name: traefik
+bifrost_llm_proxy_ingress_annotations: {}
+
+bifrost_llm_proxy_persistence_enabled: true
+bifrost_llm_proxy_persistence_size: 5Gi
+bifrost_llm_proxy_persistence_storage_class: ""
+bifrost_llm_proxy_persistence_access_modes:
+  - ReadWriteOnce
+
+# --- Metrics proxy ---------------------------------------------------------
+# Bifrost's /metrics endpoint sits behind admin Basic auth when auth is
+# enabled, which external scrapers (Prometheus) cannot easily provide. This
+# nginx pod fronts /metrics with an unauthenticated listener and injects the
+# admin Basic auth header on the upstream request to Bifrost.
+bifrost_llm_proxy_metrics_enabled: true
+bifrost_llm_proxy_metrics_name: bifrost-llm-proxy-metrics
+bifrost_llm_proxy_metrics_image: nginx:1.27-alpine
+bifrost_llm_proxy_metrics_image_pull_policy: IfNotPresent
+bifrost_llm_proxy_metrics_replica_count: 1
+
+# Port nginx listens on inside the pod, and the path it exposes.
+bifrost_llm_proxy_metrics_listen_port: 8080
+bifrost_llm_proxy_metrics_path: /metrics
+
+# Upstream Bifrost service that actually serves /metrics.
+bifrost_llm_proxy_metrics_upstream_host: >-
+  {{ bifrost_llm_proxy_release_name }}.{{ bifrost_llm_proxy_namespace }}.svc.cluster.local
+bifrost_llm_proxy_metrics_upstream_port: "{{ bifrost_llm_proxy_service_port }}"
+
+# Credentials injected on the upstream request. Default to the Bifrost admin
+# creds so the proxy can read the auth-protected /metrics endpoint.
+bifrost_llm_proxy_metrics_upstream_user: "{{ bifrost_llm_proxy_auth_admin_user }}"
+bifrost_llm_proxy_metrics_upstream_password: "{{ bifrost_llm_proxy_auth_admin_password }}"
+
+# Externally reachable service exposing the unauthenticated /metrics.
+bifrost_llm_proxy_metrics_service_type: NodePort
+bifrost_llm_proxy_metrics_service_port: 80
+bifrost_llm_proxy_metrics_service_node_port: 31991
+
+# Ingress exposing the unauthenticated /metrics endpoint over HTTP(S).
+bifrost_llm_proxy_metrics_ingress_enabled: true
+bifrost_llm_proxy_metrics_ingress_host: llm-proxy-metrics-mllab.wavea.cc
+bifrost_llm_proxy_metrics_ingress_class_name: "{{ bifrost_llm_proxy_ingress_class_name }}"
+bifrost_llm_proxy_metrics_ingress_annotations: {}
+bifrost_llm_proxy_metrics_ingress_path: "{{ bifrost_llm_proxy_metrics_path }}"
+bifrost_llm_proxy_metrics_ingress_path_type: Prefix
+
+bifrost_llm_proxy_metrics_resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 32Mi

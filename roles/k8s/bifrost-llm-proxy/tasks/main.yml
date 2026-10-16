@@ -1,0 +1,221 @@
+---
+# https://artifacthub.io/packages/helm/bifrost/bifrost
+- name: Add Bifrost LLM Proxy helm repository
+  kubernetes.core.helm_repository:
+    name: "{{ bifrost_llm_proxy_chart_repo_name }}"
+    repo_url: "{{ bifrost_llm_proxy_chart_repo_url }}"
+    state: present
+    force_update: true
+
+- name: Deploy Bifrost LLM Proxy helm chart
+  kubernetes.core.helm:
+    name: "{{ bifrost_llm_proxy_release_name }}"
+    chart_ref: "{{ bifrost_llm_proxy_chart_name }}"
+    chart_version: "{{ bifrost_llm_proxy_chart_version | default(omit) }}"
+    release_namespace: "{{ bifrost_llm_proxy_namespace }}"
+    create_namespace: "{{ bifrost_llm_proxy_create_namespace | bool }}"
+    atomic: true
+    timeout: 10m
+    values:
+      image:
+        tag: "{{ bifrost_llm_proxy_image_tag }}"
+        pullPolicy: "{{ bifrost_llm_proxy_image_pull_policy }}"
+      replicaCount: "{{ bifrost_llm_proxy_replica_count }}"
+      strategy: "{{ bifrost_llm_proxy_strategy }}"
+      ingress:
+        enabled: "{{ bifrost_llm_proxy_ingress_enabled | bool }}"
+        className: "{{ bifrost_llm_proxy_ingress_class_name }}"
+        annotations: "{{ bifrost_llm_proxy_ingress_annotations }}"
+        hosts:
+          - host: "{{ bifrost_llm_proxy_ingress_host }}"
+            paths:
+              - path: /
+                pathType: Prefix
+      persistence:
+        enabled: "{{ bifrost_llm_proxy_persistence_enabled | bool }}"
+        size: "{{ bifrost_llm_proxy_persistence_size }}"
+        storageClass: "{{ bifrost_llm_proxy_persistence_storage_class }}"
+        accessModes: "{{ bifrost_llm_proxy_persistence_access_modes }}"
+      resources:
+        requests:
+          cpu: "{{ bifrost_llm_proxy_resources.requests.cpu }}"
+          memory: "{{ bifrost_llm_proxy_resources.requests.memory }}"
+        limits:
+          cpu: "{{ bifrost_llm_proxy_resources.limits.cpu }}"
+          memory: "{{ bifrost_llm_proxy_resources.limits.memory }}"
+      nodeSelector: "{{ bifrost_llm_proxy_node_selector }}"
+      tolerations: "{{ bifrost_llm_proxy_tolerations }}"
+      livenessProbe: "{{ bifrost_llm_proxy_liveness_probe }}"
+      readinessProbe: "{{ bifrost_llm_proxy_readiness_probe }}"
+      bifrost:
+        authConfig:
+          adminUsername: "{{ bifrost_llm_proxy_auth_admin_user }}"
+          adminPassword: "{{ bifrost_llm_proxy_auth_admin_password }}"
+          isEnabled: "{{ bifrost_llm_proxy_auth_enabled }}"
+          disableAuthOnInference: "{{ bifrost_llm_proxy_auth_disable_auth_on_inference }}"
+      postgresql:
+        external:
+          enabled: "{{ bifrost_llm_proxy_postgres_enabled }}"
+          host: "{{ bifrost_llm_proxy_postgres_host }}"
+          port: "{{ bifrost_llm_proxy_postgres_port }}"
+          user: "{{ bifrost_llm_proxy_postgres_user }}"
+          password: "{{ bifrost_llm_proxy_postgres_password }}"
+          database: "{{ bifrost_llm_proxy_postgres_db }}"
+      storage:
+        mode: postgres
+
+- name: Patch Bifrost LLM Proxy service with fixed NodePort for HTTP
+  kubernetes.core.k8s:
+    state: patched
+    api_version: v1
+    kind: Service
+    name: "{{ bifrost_llm_proxy_release_name }}"
+    namespace: "{{ bifrost_llm_proxy_namespace }}"
+    definition:
+      spec:
+        type: NodePort
+        ports:
+          - name: http
+            port: "{{ bifrost_llm_proxy_service_port }}"
+            protocol: TCP
+            nodePort: "{{ bifrost_llm_proxy_service_node_port_http }}"
+  when:
+    - bifrost_llm_proxy_service_type == 'NodePort'
+    - bifrost_llm_proxy_service_node_port_http is not none
+
+# --- Metrics proxy: unauthenticated /metrics -> Basic-auth Bifrost ----------
+- name: Render Bifrost LLM Proxy metrics nginx configuration
+  ansible.builtin.set_fact:
+    bifrost_llm_proxy_metrics_nginx_conf: "{{ lookup('ansible.builtin.template', 'metrics-nginx.conf.j2') }}"
+  when: bifrost_llm_proxy_metrics_enabled | bool
+
+- name: Deploy Bifrost LLM Proxy metrics nginx ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ bifrost_llm_proxy_metrics_name }}"
+        namespace: "{{ bifrost_llm_proxy_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+          app.kubernetes.io/part-of: "{{ bifrost_llm_proxy_release_name }}"
+      data:
+        nginx.conf: "{{ bifrost_llm_proxy_metrics_nginx_conf }}"
+  when: bifrost_llm_proxy_metrics_enabled | bool
+
+- name: Deploy Bifrost LLM Proxy metrics nginx Deployment
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ bifrost_llm_proxy_metrics_name }}"
+        namespace: "{{ bifrost_llm_proxy_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+          app.kubernetes.io/part-of: "{{ bifrost_llm_proxy_release_name }}"
+      spec:
+        replicas: "{{ bifrost_llm_proxy_metrics_replica_count }}"
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+              app.kubernetes.io/part-of: "{{ bifrost_llm_proxy_release_name }}"
+            annotations:
+              # Roll the pods whenever the rendered nginx config changes.
+              checksum/config: "{{ bifrost_llm_proxy_metrics_nginx_conf | hash('sha1') }}"
+          spec:
+            containers:
+              - name: nginx
+                image: "{{ bifrost_llm_proxy_metrics_image }}"
+                imagePullPolicy: "{{ bifrost_llm_proxy_metrics_image_pull_policy }}"
+                ports:
+                  - name: http
+                    containerPort: "{{ bifrost_llm_proxy_metrics_listen_port }}"
+                    protocol: TCP
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: http
+                  initialDelaySeconds: 5
+                  periodSeconds: 15
+                readinessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: http
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  requests:
+                    cpu: "{{ bifrost_llm_proxy_metrics_resources.requests.cpu }}"
+                    memory: "{{ bifrost_llm_proxy_metrics_resources.requests.memory }}"
+                  limits:
+                    cpu: "{{ bifrost_llm_proxy_metrics_resources.limits.cpu }}"
+                    memory: "{{ bifrost_llm_proxy_metrics_resources.limits.memory }}"
+                volumeMounts:
+                  - name: nginx-config
+                    mountPath: /etc/nginx/nginx.conf
+                    subPath: nginx.conf
+                    readOnly: true
+            volumes:
+              - name: nginx-config
+                configMap:
+                  name: "{{ bifrost_llm_proxy_metrics_name }}"
+  when: bifrost_llm_proxy_metrics_enabled | bool
+
+- name: Deploy Bifrost LLM Proxy metrics nginx Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ bifrost_llm_proxy_metrics_name }}"
+        namespace: "{{ bifrost_llm_proxy_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+          app.kubernetes.io/part-of: "{{ bifrost_llm_proxy_release_name }}"
+      spec:
+        type: "{{ bifrost_llm_proxy_metrics_service_type }}"
+        selector:
+          app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+        ports:
+          # nodePort is only valid for NodePort services, so merge it in
+          # conditionally rather than emitting a key the API would reject.
+          - "{{ {'name': 'http', 'port': bifrost_llm_proxy_metrics_service_port | int, 'targetPort': 'http', 'protocol': 'TCP'} | combine({'nodePort': bifrost_llm_proxy_metrics_service_node_port | int} if bifrost_llm_proxy_metrics_service_type == 'NodePort' else {}) }}"
+  when: bifrost_llm_proxy_metrics_enabled | bool
+
+- name: Deploy Bifrost LLM Proxy metrics nginx Ingress
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: "{{ bifrost_llm_proxy_metrics_name }}"
+        namespace: "{{ bifrost_llm_proxy_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ bifrost_llm_proxy_metrics_name }}"
+          app.kubernetes.io/part-of: "{{ bifrost_llm_proxy_release_name }}"
+        annotations: "{{ bifrost_llm_proxy_metrics_ingress_annotations }}"
+      spec:
+        ingressClassName: "{{ bifrost_llm_proxy_metrics_ingress_class_name }}"
+        rules:
+          - host: "{{ bifrost_llm_proxy_metrics_ingress_host }}"
+            http:
+              paths:
+                - path: "{{ bifrost_llm_proxy_metrics_ingress_path }}"
+                  pathType: "{{ bifrost_llm_proxy_metrics_ingress_path_type }}"
+                  backend:
+                    service:
+                      name: "{{ bifrost_llm_proxy_metrics_name }}"
+                      port: "{{ {'number': bifrost_llm_proxy_metrics_service_port | int} }}"
+  when:
+    - bifrost_llm_proxy_metrics_enabled | bool
+    - bifrost_llm_proxy_metrics_ingress_enabled | bool

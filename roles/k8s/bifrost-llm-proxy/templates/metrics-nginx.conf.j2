@@ -1,0 +1,27 @@
+worker_processes 1;
+events {
+  worker_connections 1024;
+}
+http {
+  access_log off;
+  server {
+    listen {{ bifrost_llm_proxy_metrics_listen_port }};
+
+    # Unauthenticated metrics endpoint. The Basic auth header is added here so
+    # external scrapers do not need Bifrost admin credentials.
+    location = {{ bifrost_llm_proxy_metrics_path }} {
+      proxy_pass http://{{ bifrost_llm_proxy_metrics_upstream_host | trim }}:{{ bifrost_llm_proxy_metrics_upstream_port }}{{ bifrost_llm_proxy_metrics_path }};
+      proxy_set_header Authorization "Basic {{ (bifrost_llm_proxy_metrics_upstream_user ~ ':' ~ bifrost_llm_proxy_metrics_upstream_password) | b64encode }}";
+      proxy_set_header Host $host;
+    }
+
+    location = /healthz {
+      add_header Content-Type text/plain;
+      return 200 "ok\n";
+    }
+
+    location / {
+      return 404;
+    }
+  }
+}
