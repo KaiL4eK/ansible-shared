@@ -1,0 +1,56 @@
+---
+k8s_postgresql_namespace: ""
+k8s_postgresql_release_name: postgresql
+k8s_postgresql_chart_ref: oci://registry-1.docker.io/bitnamicharts/postgresql
+k8s_postgresql_chart_version: "16.7.27"
+k8s_postgresql_image_values:
+  repository: bitnamilegacy/postgresql
+  tag: "17.6.0-debian-12-r4"
+  pullPolicy: IfNotPresent
+k8s_postgresql_admin_password: ""
+k8s_postgresql_enable_postgres_user: true
+k8s_postgresql_resources_preset: small
+# Явные requests/limits; при непустом значении имеют приоритет над resourcesPreset
+k8s_postgresql_resources: {}
+k8s_postgresql_persistence_enabled: true
+k8s_postgresql_storage_class: nfs-primary
+k8s_postgresql_storage_size: 10Gi
+k8s_postgresql_persistence_access_modes:
+  - ReadWriteOnce
+k8s_postgresql_node_selector: {}
+k8s_postgresql_service_type: NodePort
+k8s_postgresql_node_port: 30432
+
+# --- Конфигурация СУБД: прокидывается в postgresqlExtendedConf чарта (override.conf) ---
+# Ключи/значения — как в postgresql.conf; часть применяется только после рестарта поды.
+k8s_postgresql_extended_conf: {}
+
+# shared_preload_libraries (через запятую). Пустая строка — используем дефолт
+# чарта (pgaudit).
+k8s_postgresql_shared_preload_libraries: ""
+
+# Расширения, создаваемые во всех пользовательских БД после деплоя
+# (CREATE EXTENSION IF NOT EXISTS, идемпотентно).
+k8s_postgresql_extensions: []
+k8s_postgresql_atomic: true
+k8s_postgresql_wait: true
+k8s_postgresql_take_ownership: false
+k8s_postgresql_timeout: 10m0s
+k8s_postgresql_create_namespace: false
+
+# --- Метрики: postgres-exporter sidecar + ServiceMonitor ---
+k8s_postgresql_metrics_enabled: false
+k8s_postgresql_metrics_image_values:
+  registry: docker.io
+  repository: bitnamilegacy/postgres-exporter
+  tag: "0.17.1-debian-12-r16"  # дефолт чарта 16.7.27, зафиксирован
+  pullPolicy: IfNotPresent
+k8s_postgresql_metrics_resources_preset: nano
+# Явные requests/limits экспортера; при непустом значении имеют приоритет над resourcesPreset
+k8s_postgresql_metrics_resources: {}
+k8s_postgresql_metrics_service_monitor_enabled: false
+k8s_postgresql_metrics_service_monitor_interval: 30s
+k8s_postgresql_metrics_service_monitor_scrape_timeout: 10s
+# Метка, по которой Prometheus из kube-prometheus-stack (релиз prometheus) находит ServiceMonitor
+k8s_postgresql_metrics_service_monitor_labels:
+  release: prometheus

@@ -1,0 +1,27 @@
+---
+- name: Require an explicit controller-side kubeconfig and absolute home
+  ansible.builtin.assert:
+    that:
+      - hermes_kubeconfig_source | length > 0
+      - hermes_kubeconfig_source is match('^/')
+      - hermes_kubeconfig_user_home is match('^/')
+      - hermes_kubeconfig_user | length > 0
+      - hermes_kubeconfig_group | length > 0
+
+- name: Ensure private default Kubernetes directory exists
+  ansible.builtin.file:
+    path: "{{ hermes_kubeconfig_user_home }}/.kube"
+    state: directory
+    owner: "{{ hermes_kubeconfig_user }}"
+    group: "{{ hermes_kubeconfig_group }}"
+    mode: "0700"
+
+- name: Install selected kubeconfig without logging credentials
+  ansible.builtin.copy:
+    src: "{{ hermes_kubeconfig_source }}"
+    dest: "{{ hermes_kubeconfig_user_home }}/.kube/config"
+    owner: "{{ hermes_kubeconfig_user }}"
+    group: "{{ hermes_kubeconfig_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false

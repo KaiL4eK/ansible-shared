@@ -31,6 +31,9 @@ Before working with this repository, install Ansible dependencies:
 - `roles/docker/nfs-server/` provides a shared Docker-based NFS server role.
 - `roles/docker/engine/` устанавливает Docker Engine и Docker Compose и
   управляет доступом к группе `docker`.
+- `roles/k8s/postgresql/` deploys PostgreSQL to Kubernetes via the Bitnami
+  Helm chart (fixed chart and image versions, optional metrics sidecar with
+  ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
@@ -51,6 +54,8 @@ Before working with this repository, install Ansible dependencies:
   scheduler and `GITHUB_BACKUP_TOKEN` environment value.
 - `roles/hermes/git_restore/` restores a Hermes home directory from the Git
   backup repository without overwriting existing data.
+- `roles/hermes/kubeconfig/` installs an explicitly selected kubeconfig for an
+  existing Hermes user without generating cluster credentials.
 - `roles/nodejs/runtime/` installs Node.js and npm from NodeSource on Debian
   and Ubuntu hosts.
 - `roles/llm/llama-cpp/` deploys a llama.cpp server with Docker Compose,
@@ -59,3 +64,51 @@ Before working with this repository, install Ansible dependencies:
   optional Ray multi-node setups and `auto` tensor-parallel GPU detection.
 - `roles/llm/stable-diffusion-cpp/` builds a pinned CUDA sd-server and serves
   GGUF diffusion models through a bearer-authenticated Docker Compose API.
+
+## Hermes Kubernetes Credentials
+
+`roles/hermes/kubeconfig/` requires an explicit absolute controller-side
+`hermes_kubeconfig_source`. It does not search for credentials or contact the
+Kubernetes API. The caller supplies privilege escalation and an existing user.
+
+| Role Input | Default | Purpose |
+| --- | --- | --- |
+| `hermes_kubeconfig_source` | empty, required | Absolute source filename on controller |
+| `hermes_kubeconfig_user` | `hermes` | Destination owner |
+| `hermes_kubeconfig_group` | `{{ hermes_kubeconfig_user }}` | Destination group |
+| `hermes_kubeconfig_user_home` | `/home/{{ hermes_kubeconfig_user }}` | Absolute managed-user home |
+
+The destination is `{{ hermes_kubeconfig_user_home }}/.kube/config`: normally
+`/home/hermes/.kube/config`, owned by `hermes:hermes`, mode `0600`, with directory
+mode `0700`. Copying replaces the existing file without merging or creating
+backups. Credentials are hidden from logs and diffs. Kubernetes clients use this
+HOME-based default unless `KUBECONFIG` or explicit client configuration overrides
+it. The role does not change the environment, install kubectl, or restart Hermes.
+
+In the HomeLab consumer, `ansible/playbooks/hermes/kubeconfig.yml` accepts only
+an explicit source basename through `hermes_kubeconfig_name` under the project's
+`ansible/kubeconfigs/`. Its default is `homelab-llm-access`; its default target is
+`hermes-vm.ad`, overridable by `hermes_target`. Inventory `hermes_user`,
+`hermes_user_group` and `hermes_user_home` are passed to the corresponding role
+inputs. The controller source restriction does not prohibit the explicitly
+managed destination `.kube/config` on Hermes.
+
+Operator commands from the parent project's `ansible/` directory, shown only
+as documentation and not executed:
+
+```sh
+pdm run ansible-playbook playbooks/k8s/llm-access.yml
+pdm run ansible-playbook playbooks/hermes/kubeconfig.yml -e '{"hermes_target":"hermes-vm.ad","hermes_kubeconfig_name":"homelab-llm-access"}'
+```
+
+Generation and upload are separate. The first playbook uses administrative
+`kubeconfigs/homelab`, creates the separate `default/llm-access` ServiceAccount
+and writes `kubeconfigs/homelab-llm-access`; existing `homelab-ro` and
+`homelab-llm` credentials remain unchanged. Access policy, JSON namespace-list
+overrides and token revocation are documented in the parent `ansible/AGENTS.md`
+and `docs/adr/adr-28-llm-kubernetes-access.md`. The credential is long-lived:
+protect all copies, revoke by deleting its token Secret or ServiceAccount, and
+explicitly upload again after generation recreates a revoked token. Workload
+writes allow indirect Secret access and potential privilege escalation; this
+identity is not a strict security sandbox. No deployment was performed as part
+of this documentation change.
