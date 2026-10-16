@@ -1,0 +1,45 @@
+---
+- name: Проверить входные параметры дашбордов
+  ansible.builtin.assert:
+    that:
+      - grafana_dashboard_namespace | length > 0
+      - grafana_dashboard_files is sequence
+      - grafana_dashboard_files is not string
+      - grafana_dashboard_files | length > 0
+    fail_msg: "Передайте namespace и непустой список JSON-файлов дашбордов"
+
+- name: Проверить JSON дашбордов до изменения ресурсов
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.file', item) | from_json is mapping
+    fail_msg: "Дашборд должен быть JSON-объектом: {{ item }}"
+  loop: "{{ grafana_dashboard_files }}"
+
+- name: Собрать имена ConfigMap
+  ansible.builtin.set_fact:
+    k8s_grafana_dashboard_names: >-
+      {{ grafana_dashboard_files | map('basename') | map('splitext') | map('first')
+         | map('lower') | map('replace', '_', '-') | list }}
+
+- name: Исключить перезапись разных дашбордов одним ConfigMap
+  ansible.builtin.assert:
+    that:
+      - k8s_grafana_dashboard_names | unique | length == grafana_dashboard_files | length
+    fail_msg: "Имена JSON-файлов должны давать уникальные имена ConfigMap во всех папках"
+
+- name: Создать ConfigMap для каждого дашборда
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "grafana-dashboard-{{ item | basename | splitext | first | lower | replace('_', '-') }}"
+        namespace: "{{ grafana_dashboard_namespace }}"
+        labels: "{{ grafana_dashboard_configmap_labels }}"
+        annotations:
+          grafana_folder: "{{ item | dirname | basename }}"
+      data: "{{ {(item | basename): lookup('ansible.builtin.file', item)} }}"
+  loop: "{{ grafana_dashboard_files }}"
+  loop_control:
+    label: "{{ (item | dirname | basename) ~ '/' ~ (item | basename) }}"

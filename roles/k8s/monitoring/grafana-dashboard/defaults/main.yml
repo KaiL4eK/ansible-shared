@@ -1,0 +1,6 @@
+---
+grafana_dashboard_namespace: monitoring
+grafana_dashboard_files: []
+grafana_dashboard_configmap_labels:
+  grafana_dashboard: "1"
+  app.kubernetes.io/managed-by: ansible

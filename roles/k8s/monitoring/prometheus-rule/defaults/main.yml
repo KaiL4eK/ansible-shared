@@ -1,0 +1,3 @@
+---
+# Готовые документы PrometheusRule; имена, namespace, labels и правила задаёт потребитель.
+prometheus_rule_definitions: []

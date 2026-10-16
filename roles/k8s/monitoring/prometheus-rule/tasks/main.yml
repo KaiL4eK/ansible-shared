@@ -1,0 +1,28 @@
+---
+- name: Проверить список PrometheusRule
+  ansible.builtin.assert:
+    that:
+      - prometheus_rule_definitions is sequence
+      - prometheus_rule_definitions is not string
+      - prometheus_rule_definitions | length > 0
+    fail_msg: "Передайте непустой список документов prometheus_rule_definitions"
+
+- name: Проверить документы PrometheusRule до применения
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.apiVersion == 'monitoring.coreos.com/v1'
+      - item.kind == 'PrometheusRule'
+      - item.metadata.name | length > 0
+      - item.metadata.namespace | length > 0
+      - item.spec.groups | length > 0
+      - item.spec.groups | map(attribute='rules') | flatten | length > 0
+    fail_msg: "Каждый документ должен быть PrometheusRule с именем, namespace и правилами"
+  loop: "{{ prometheus_rule_definitions }}"
+  loop_control:
+    label: "{{ item.metadata.name | default('invalid') }}"
+
+- name: Применить PrometheusRule
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ prometheus_rule_definitions }}"

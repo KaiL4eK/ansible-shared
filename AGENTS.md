@@ -17,6 +17,9 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 
 ## Working Rules
 
+- Дашборды Grafana доставляются только через ConfigMap/sidecar; папки создаёт
+  provisioning по `grafana_folder`. Не добавлять в роль дашбордов API Grafana,
+  admin user/password или зависимость от Grafana vault.
 - Use this file for repository-level rules and use `.agents/skills/ansible-role/SKILL.md` for role authoring workflow.
 - Treat `roles/<domain>/<role-name>` as the standard role layout in this repository.
 - Keep deployment-specific values outside roles and pass them in explicitly from the consumer.
