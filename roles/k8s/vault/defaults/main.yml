@@ -1,0 +1,25 @@
+---
+k8s_vault_namespace: vault
+k8s_vault_release_name: vault
+k8s_vault_chart_version: "0.34.1"
+k8s_vault_image_repository: hashicorp/vault
+k8s_vault_image_tag: "2.2.0"
+k8s_vault_create_namespace: false
+k8s_vault_ingress_enabled: false
+k8s_vault_ingress_host: ""
+k8s_vault_ingress_class: traefik
+k8s_vault_ingress_annotations: {}
+k8s_vault_ingress_tls: []
+k8s_vault_pg_connection_url: ""
+k8s_vault_pg_secret_name: vault-postgresql
+k8s_vault_resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+# Новый сервер не Ready до ручных init/unseal.
+k8s_vault_wait: false
+k8s_vault_atomic: false
+k8s_vault_timeout: 10m

@@ -1,0 +1,64 @@
+global:
+  tlsDisable: true
+injector:
+  enabled: false
+csi:
+  enabled: false
+server:
+  enabled: true
+  image:
+    repository: {{ k8s_vault_image_repository | to_json }}
+    tag: {{ k8s_vault_image_tag | to_json }}
+    pullPolicy: IfNotPresent
+  updateStrategyType: OnDelete
+  resources: {{ k8s_vault_resources | to_json }}
+  dev:
+    enabled: false
+  standalone:
+    enabled: true
+    config: |-
+      ui = true
+      disable_mlock = true
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+      storage "postgresql" {
+        max_parallel = "16"
+      }
+  ha:
+    enabled: false
+  dataStorage:
+    enabled: false
+  auditStorage:
+    enabled: false
+  extraSecretEnvironmentVars:
+    - envName: VAULT_PG_CONNECTION_URL
+      secretName: {{ k8s_vault_pg_secret_name | to_json }}
+      secretKey: connection-url
+  readinessProbe:
+    enabled: true
+    path: /v1/sys/health?standbyok=true
+  livenessProbe:
+    enabled: true
+    path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+    initialDelaySeconds: 60
+  service:
+    enabled: true
+    type: ClusterIP
+    publishNotReadyAddresses: false
+  authDelegator:
+    enabled: false
+  ingress:
+    enabled: {{ k8s_vault_ingress_enabled | to_json }}
+    ingressClassName: {{ k8s_vault_ingress_class | to_json }}
+    activeService: false
+    pathType: Prefix
+    annotations: {{ k8s_vault_ingress_annotations | to_json }}
+    tls: {{ k8s_vault_ingress_tls | to_json }}
+    hosts:
+      - host: {{ k8s_vault_ingress_host | to_json }}
+        paths: ["/"]
+ui:
+  enabled: false

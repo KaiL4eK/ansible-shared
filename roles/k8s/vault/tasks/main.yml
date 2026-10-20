@@ -1,0 +1,72 @@
+---
+- name: Проверить параметры Vault
+  ansible.builtin.assert:
+    that:
+      - k8s_vault_namespace | length > 0
+      - k8s_vault_release_name | length > 0
+      - k8s_vault_chart_version | length > 0
+      - k8s_vault_image_tag not in ['', 'latest', 'stable', 'main']
+      - not k8s_vault_ingress_enabled or k8s_vault_ingress_host | length > 0
+      - not k8s_vault_atomic or k8s_vault_wait
+
+- name: Проверить подключение PostgreSQL
+  ansible.builtin.assert:
+    that:
+      - k8s_vault_pg_connection_url is match('^postgres(ql)?://')
+  no_log: true
+
+- name: Проверить существование namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ k8s_vault_namespace }}"
+  register: k8s_vault_namespace_info
+  when: k8s_vault_create_namespace
+
+- name: Создать отсутствующий namespace по явному запросу
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ k8s_vault_namespace }}"
+  when:
+    - k8s_vault_create_namespace
+    - k8s_vault_namespace_info.resources | length == 0
+
+- name: Сохранить подключение PostgreSQL в Secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ k8s_vault_pg_secret_name }}"
+        namespace: "{{ k8s_vault_namespace }}"
+      type: Opaque
+      data:
+        connection-url: "{{ k8s_vault_pg_connection_url | b64encode }}"
+  no_log: true
+  diff: false
+
+- name: Подключить официальный репозиторий HashiCorp
+  kubernetes.core.helm_repository:
+    name: hashicorp
+    repo_url: https://helm.releases.hashicorp.com
+    state: present
+
+- name: Установить или обновить Vault
+  kubernetes.core.helm:
+    name: "{{ k8s_vault_release_name }}"
+    chart_ref: hashicorp/vault
+    chart_version: "{{ k8s_vault_chart_version }}"
+    update_repo_cache: true
+    release_namespace: "{{ k8s_vault_namespace }}"
+    create_namespace: false
+    release_state: present
+    reset_values: true
+    atomic: "{{ k8s_vault_atomic }}"
+    wait: "{{ k8s_vault_wait }}"
+    timeout: "{{ k8s_vault_timeout }}"
+    values: "{{ lookup('ansible.builtin.template', 'values.yml.j2') | from_yaml }}"
