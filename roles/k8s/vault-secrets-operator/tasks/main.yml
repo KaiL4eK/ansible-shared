@@ -1,0 +1,57 @@
+---
+- name: Проверить параметры Vault Secrets Operator
+  ansible.builtin.assert:
+    that:
+      - k8s_vso_namespace | length > 0
+      - k8s_vso_release_name | length > 0
+      - k8s_vso_chart_version | length > 0
+      - k8s_vso_image_tag not in ['', 'latest', 'stable', 'main']
+      - k8s_vso_proxy_image_tag not in ['', 'latest', 'stable', 'main']
+
+- name: Подключить официальный репозиторий HashiCorp
+  kubernetes.core.helm_repository:
+    name: hashicorp
+    repo_url: https://helm.releases.hashicorp.com
+    state: present
+
+- name: Установить или обновить Vault Secrets Operator
+  kubernetes.core.helm:
+    name: "{{ k8s_vso_release_name }}"
+    chart_ref: hashicorp/vault-secrets-operator
+    chart_version: "{{ k8s_vso_chart_version }}"
+    update_repo_cache: true
+    release_namespace: "{{ k8s_vso_namespace }}"
+    create_namespace: false
+    release_state: present
+    reset_values: true
+    # CRD hook изменяет cluster-scoped схему; Helm rollback её не откатывает.
+    atomic: false
+    wait: true
+    timeout: "{{ k8s_vso_timeout }}"
+    values:
+      controller:
+        replicas: 1
+        manager:
+          image:
+            repository: "{{ k8s_vso_image_repository }}"
+            tag: "{{ k8s_vso_image_tag }}"
+          clientCache:
+            persistenceModel: none
+          globalTransformationOptions:
+            excludeRaw: true
+        kubeRbacProxy:
+          image:
+            repository: "{{ k8s_vso_proxy_image_repository }}"
+            tag: "{{ k8s_vso_proxy_image_tag }}"
+      defaultVaultConnection:
+        enabled: false
+      defaultAuthMethod:
+        enabled: false
+      csi:
+        enabled: false
+      telemetry:
+        serviceMonitor:
+          enabled: false
+      hooks:
+        upgradeCRDs:
+          enabled: true

@@ -1,0 +1,9 @@
+---
+k8s_vso_namespace: vault
+k8s_vso_release_name: vault-secrets-operator
+k8s_vso_chart_version: "1.6.0"
+k8s_vso_image_repository: hashicorp/vault-secrets-operator
+k8s_vso_image_tag: "1.6.1"
+k8s_vso_proxy_image_repository: quay.io/brancz/kube-rbac-proxy
+k8s_vso_proxy_image_tag: v0.18.1
+k8s_vso_timeout: 5m
