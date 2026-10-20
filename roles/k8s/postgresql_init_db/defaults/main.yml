@@ -1,0 +1,17 @@
+---
+# Neutral default; consumers should select their target namespace explicitly.
+k8s_postgresql_init_namespace: default
+k8s_postgresql_init_job_name: postgresql-init-db
+k8s_postgresql_init_image: postgres:17.6-bookworm
+k8s_postgresql_init_host: ""
+k8s_postgresql_init_port: 5432
+k8s_postgresql_init_sslmode: prefer
+k8s_postgresql_init_admin_database: postgres
+k8s_postgresql_init_database: ""
+k8s_postgresql_init_admin_secret_name: ""
+k8s_postgresql_init_admin_username_key: POSTGRES_ADMIN_USERNAME
+k8s_postgresql_init_admin_secret_key: POSTGRES_ADMIN_PASSWORD
+k8s_postgresql_init_user_secret_name: ""
+k8s_postgresql_init_user_username_key: MOT_DATABASE_USERNAME
+k8s_postgresql_init_user_secret_key: MOT_DATABASE_PASSWORD
+k8s_postgresql_init_timeout: 330
