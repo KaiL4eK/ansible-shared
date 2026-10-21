@@ -22,6 +22,7 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   admin user/password или зависимость от Grafana vault.
 - Use this file for repository-level rules and use `.agents/skills/ansible-role/SKILL.md` for role authoring workflow.
 - Treat `roles/<domain>/<role-name>` as the standard role layout in this repository.
+- Kubernetes database/user bootstrap that must execute on the cluster network belongs in a reusable `roles/k8s/` role backed by a short-lived Job; pass credentials via `secretKeyRef`, never Job args, ConfigMaps or logs. Consumers provision and own the referenced Secrets; the role must not create or delete Secret/ConfigMap resources.
 - Keep deployment-specific values outside roles and pass them in explicitly from the consumer.
 - Keep external dependencies declared in `requirements.yml`.
 - Do not add environment-specific playbooks, inventory, or vault content here.

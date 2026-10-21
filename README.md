@@ -28,6 +28,22 @@ Before working with this repository, install Ansible dependencies:
 
 ## Current Content
 
+- `roles/k8s/vault/` — Vault с внешним PostgreSQL backend, credentials через
+  Secret, ручные init/unseal; [контракт роли](roles/k8s/vault/README.md).
+
+- `roles/k8s/bifrost-llm-proxy/` — Bifrost через официальный Helm chart.
+  Credentials передаются непосредственно через Helm values; отдельный Secret
+  роль не создаёт. Helm values формируются непосредственно из переменных роли,
+  без промежуточных facts и словарей overrides. Входы с префиксом
+  `bifrost_llm_proxy_`: `encryption_key`, `auth_*`, `enforce_auth_on_inference`,
+  `enable_logging`, `disable_content_logging`, `vk_rotation_cooldown`,
+  `config_store_enabled`, `config_store_type`, `logs_store_enabled`,
+  `logs_store_type` и `persistence_*`. Auth доставляется через
+  `bifrost.governance.authConfig`, persistence — через `storage.persistence`
+  по структуре chart `2.1.43`.
+  Значения credentials видимы держателям доступа к Helm release и ConfigMap;
+  роль скрывает Helm task через `no_log`. `atomic` и `wait`
+  настраиваются одноимёнными переменными с тем же префиксом (defaults `true`).
 - `roles/k8s/monitoring/` — общие роли дашбордов Grafana и
   PrometheusRule. Контракты и примеры: [мониторинг](roles/k8s/monitoring/README.md).
 - `roles/docker/nfs-server/` provides a shared Docker-based NFS server role.
@@ -36,6 +52,12 @@ Before working with this repository, install Ansible dependencies:
 - `roles/k8s/postgresql/` deploys PostgreSQL to Kubernetes via the Bitnami
   Helm chart (fixed chart and image versions, optional metrics sidecar with
   ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
+- `roles/k8s/postgresql_init_db/` creates a PostgreSQL login-role and database
+  through a short-lived in-cluster Job using a pinned official PostgreSQL client
+  image; it references pre-provisioned Kubernetes Secrets and never manages them.
+- `roles/k8s/vault-secrets-operator/` deploys the official HashiCorp VSO Helm
+  chart with pinned chart and image versions; per-consumer Vault auth and sync
+  resources remain owned by the consumer/infrastructure playbook.
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user

@@ -7,6 +7,11 @@ bifrost_llm_proxy_chart_version: ""
 bifrost_llm_proxy_release_name: bifrost-llm-proxy
 bifrost_llm_proxy_namespace: default
 bifrost_llm_proxy_create_namespace: true
+bifrost_llm_proxy_atomic: true
+bifrost_llm_proxy_wait: true
+
+bifrost_llm_proxy_image_repository: docker.io/maximhq/bifrost
+bifrost_llm_proxy_encryption_key: ""
 
 bifrost_llm_proxy_replica_count: 1
 bifrost_llm_proxy_image_tag: ""
@@ -29,6 +34,10 @@ bifrost_llm_proxy_auth_enabled: false
 bifrost_llm_proxy_auth_admin_user: admin
 bifrost_llm_proxy_auth_admin_password: changeme
 bifrost_llm_proxy_auth_disable_auth_on_inference: true
+bifrost_llm_proxy_enforce_auth_on_inference: true
+bifrost_llm_proxy_enable_logging: true
+bifrost_llm_proxy_disable_content_logging: false
+bifrost_llm_proxy_vk_rotation_cooldown: ""
 
 bifrost_llm_proxy_node_selector: {}
 bifrost_llm_proxy_tolerations: []
@@ -65,6 +74,10 @@ bifrost_llm_proxy_postgres_port: 5432
 bifrost_llm_proxy_postgres_db: bifrost-llm-proxy
 bifrost_llm_proxy_postgres_user: bifrost-llm-proxy
 bifrost_llm_proxy_postgres_password: changeme
+bifrost_llm_proxy_config_store_enabled: true
+bifrost_llm_proxy_config_store_type: postgres
+bifrost_llm_proxy_logs_store_enabled: true
+bifrost_llm_proxy_logs_store_type: postgres
 
 bifrost_llm_proxy_ingress_enabled: true
 bifrost_llm_proxy_ingress_host: llm-proxy-mllab.wavea.cc

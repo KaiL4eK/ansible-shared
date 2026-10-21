@@ -14,10 +14,12 @@
     chart_version: "{{ bifrost_llm_proxy_chart_version | default(omit) }}"
     release_namespace: "{{ bifrost_llm_proxy_namespace }}"
     create_namespace: "{{ bifrost_llm_proxy_create_namespace | bool }}"
-    atomic: true
+    atomic: "{{ bifrost_llm_proxy_atomic | bool }}"
+    wait: "{{ bifrost_llm_proxy_wait | bool }}"
     timeout: 10m
     values:
       image:
+        repository: "{{ bifrost_llm_proxy_image_repository }}"
         tag: "{{ bifrost_llm_proxy_image_tag }}"
         pullPolicy: "{{ bifrost_llm_proxy_image_pull_policy }}"
       replicaCount: "{{ bifrost_llm_proxy_replica_count }}"
@@ -31,11 +33,6 @@
             paths:
               - path: /
                 pathType: Prefix
-      persistence:
-        enabled: "{{ bifrost_llm_proxy_persistence_enabled | bool }}"
-        size: "{{ bifrost_llm_proxy_persistence_size }}"
-        storageClass: "{{ bifrost_llm_proxy_persistence_storage_class }}"
-        accessModes: "{{ bifrost_llm_proxy_persistence_access_modes }}"
       resources:
         requests:
           cpu: "{{ bifrost_llm_proxy_resources.requests.cpu }}"
@@ -48,11 +45,20 @@
       livenessProbe: "{{ bifrost_llm_proxy_liveness_probe }}"
       readinessProbe: "{{ bifrost_llm_proxy_readiness_probe }}"
       bifrost:
+        encryptionKey: "{{ bifrost_llm_proxy_encryption_key }}"
         authConfig:
-          adminUsername: "{{ bifrost_llm_proxy_auth_admin_user }}"
-          adminPassword: "{{ bifrost_llm_proxy_auth_admin_password }}"
-          isEnabled: "{{ bifrost_llm_proxy_auth_enabled }}"
-          disableAuthOnInference: "{{ bifrost_llm_proxy_auth_disable_auth_on_inference }}"
+          isEnabled: false
+        governance:
+          authConfig:
+            adminUsername: "{{ bifrost_llm_proxy_auth_admin_user }}"
+            adminPassword: "{{ bifrost_llm_proxy_auth_admin_password }}"
+            isEnabled: "{{ bifrost_llm_proxy_auth_enabled | bool }}"
+            disableAuthOnInference: "{{ bifrost_llm_proxy_auth_disable_auth_on_inference | bool }}"
+        client:
+          enforceAuthOnInference: "{{ bifrost_llm_proxy_enforce_auth_on_inference | bool }}"
+          enableLogging: "{{ bifrost_llm_proxy_enable_logging | bool }}"
+          disableContentLogging: "{{ bifrost_llm_proxy_disable_content_logging | bool }}"
+          vkRotationCooldown: "{{ bifrost_llm_proxy_vk_rotation_cooldown }}"
       postgresql:
         external:
           enabled: "{{ bifrost_llm_proxy_postgres_enabled }}"
@@ -63,6 +69,18 @@
           database: "{{ bifrost_llm_proxy_postgres_db }}"
       storage:
         mode: postgres
+        persistence:
+          enabled: "{{ bifrost_llm_proxy_persistence_enabled | bool }}"
+          size: "{{ bifrost_llm_proxy_persistence_size }}"
+          storageClass: "{{ bifrost_llm_proxy_persistence_storage_class }}"
+          accessMode: "{{ bifrost_llm_proxy_persistence_access_modes | first }}"
+        configStore:
+          enabled: "{{ bifrost_llm_proxy_config_store_enabled | bool }}"
+          type: "{{ bifrost_llm_proxy_config_store_type }}"
+        logsStore:
+          enabled: "{{ bifrost_llm_proxy_logs_store_enabled | bool }}"
+          type: "{{ bifrost_llm_proxy_logs_store_type }}"
+  no_log: true
 
 - name: Patch Bifrost LLM Proxy service with fixed NodePort for HTTP
   kubernetes.core.k8s:
