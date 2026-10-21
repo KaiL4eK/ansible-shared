@@ -58,7 +58,8 @@ Before working with this repository, install Ansible dependencies:
   ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
 - `roles/k8s/postgresql_init_db/` creates a PostgreSQL login-role and database
   through a short-lived in-cluster Job using a pinned official PostgreSQL client
-  image; it references pre-provisioned Kubernetes Secrets and never manages them.
+  image; поддерживает готовые Secrets без изменения их жизненного цикла и передачу
+  credentials с созданием/удалением временного Secret самой ролью.
 - `roles/k8s/vault-secrets-operator/` deploys the official HashiCorp VSO Helm
   chart with pinned chart and image versions; per-consumer Vault auth and sync
   resources remain owned by the consumer/infrastructure playbook.

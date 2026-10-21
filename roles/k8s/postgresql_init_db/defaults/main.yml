@@ -15,3 +15,9 @@ k8s_postgresql_init_user_secret_name: ""
 k8s_postgresql_init_user_username_key: MOT_DATABASE_USERNAME
 k8s_postgresql_init_user_secret_key: MOT_DATABASE_PASSWORD
 k8s_postgresql_init_timeout: 330
+k8s_postgresql_init_manage_credentials: false
+k8s_postgresql_init_admin_user: ""
+k8s_postgresql_init_admin_password: ""
+k8s_postgresql_init_user: ""
+k8s_postgresql_init_password: ""
+k8s_postgresql_init_kubeconfig: ""

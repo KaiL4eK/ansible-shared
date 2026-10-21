@@ -38,7 +38,7 @@ def main():
     env.pop("ANSIBLE_VAULT_PASSWORD_FILE", None)
     env.pop("ANSIBLE_LOG_PATH", None)
     shell = yaml.safe_load(
-        (shared / "roles/k8s/postgresql_init_db/tasks/main.yml").read_text()
+        (shared / "roles/k8s/postgresql_init_db/tasks/job.yml").read_text()
     )[1]["kubernetes.core.k8s"]["definition"]["spec"]["template"]["spec"]["containers"][0]["args"][0]
 
     started = run([
