@@ -139,6 +139,11 @@ def main():
                 sql(f"ALTER DATABASE {db} OWNER TO {user}")
             print(f"OK: {mode}: создание, повтор, неверный пароль, конфликт владельца")
 
+        hyphenated = bootstrap("job", "job-hyphen-user", "job-hyphen-db", "hyphen-test-password")
+        assert hyphenated.returncode == 0, hyphenated.stdout + hyphenated.stderr
+        assert sql("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'job-hyphen-db'") == "job-hyphen-user"
+        print("OK: Job поддерживает дефисы в имени пользователя и БД")
+
         # Trust не должен давать ложное подтверждение совпадения паролей.
         changed = run([
             "docker", "exec", container, "sh", "-ec",
