@@ -1,6 +1,6 @@
 # PostgreSQL init database through Kubernetes Job
 
-Создаёт/обновляет login-role и database идемпотентной SQL-командой из
+Создаёт отсутствующие login-role и database идемпотентной SQL-командой из
 короткоживущего Kubernetes Job. PostgreSQL server не устанавливается: Job
 подключается к заданному Service/DNS имени. Пин образа по умолчанию — официальный
 `postgres:17.6-bookworm`.
@@ -17,3 +17,12 @@ ServiceAccount token.
 namespace. Secret’ы должны быть заранее синхронизированы VSO и защищены
 namespace-scoped RBAC и encryption at rest. DB-init следует запускать в
 инфраструктурном namespace, недоступном приложенческому CI.
+
+Существующие пароль, атрибуты пользователя и владелец БД не изменяются.
+Перед созданием БД Job проверяет вход с application credentials в
+`k8s_postgresql_init_admin_database` (по умолчанию `postgres`). Ошибка входа или
+конфликт владельца существующей БД завершает Job с ошибкой, без сброса пароля.
+Должен быть разрешён CONNECT к проверочной БД и настроена парольная
+аутентификация PostgreSQL: контрольный вход с заведомо неверным паролем обязан
+завершаться ошибкой. `trust` и прочие способы входа без проверки пароля отклоняются.
+Ротация credentials — отдельная операторская операция, не часть bootstrap.

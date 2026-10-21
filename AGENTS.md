@@ -17,6 +17,14 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 
 ## Working Rules
 
+- PostgreSQL bootstrap (напрямую и через Kubernetes Job) создаёт только
+  отсутствующие user/DB. Никогда не менять пароль/атрибуты существующего
+  пользователя или владельца существующей БД. До создания БД проверять
+  application credentials; при ошибке падать, не исправлять пароль.
+  Успешный вход без парольной аутентификации не подтверждает совпадение пароля:
+  контрольный вход с неверным паролем должен отклоняться. Проверять оба пути
+  интеграционными тестами с сохранением исходного хеша пароля.
+
 - Дашборды Grafana доставляются только через ConfigMap/sidecar; папки создаёт
   provisioning по `grafana_folder`. Не добавлять в роль дашбордов API Grafana,
   admin user/password или зависимость от Grafana vault.

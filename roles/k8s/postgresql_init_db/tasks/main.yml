@@ -93,8 +93,9 @@
                     ) AS owner_conflict
                     \gset
                     \if :owner_conflict
-                      \echo 'Existing database has a different owner; bootstrap must not change it.'
-                      \quit 1
+                      DO $$ BEGIN
+                        RAISE EXCEPTION 'Existing database has a different owner; bootstrap must not change it.';
+                      END $$;
                     \endif
 
                     SELECT format('CREATE DATABASE %I OWNER %I', :'app_database', :'app_user')

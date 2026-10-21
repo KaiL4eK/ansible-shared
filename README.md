@@ -28,6 +28,10 @@ Before working with this repository, install Ansible dependencies:
 
 ## Current Content
 
+- `roles/postgresql/init-db/` — прямое создание отсутствующих PostgreSQL user/DB;
+  существующий пароль не меняется, ошибка проверки credentials останавливает
+  bootstrap. Такой же контракт у `roles/k8s/postgresql_init_db/`.
+
 - `roles/k8s/vault/` — Vault с внешним PostgreSQL backend, credentials через
   Secret, ручные init/unseal; [контракт роли](roles/k8s/vault/README.md).
 

@@ -105,6 +105,11 @@ def main():
             before = sql(f"SELECT rolpassword FROM pg_authid WHERE rolname = '{user}'")
             repeat = bootstrap(mode, user, db, "original-test-password")
             assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+            if mode == "direct":
+                assert "changed=0" in repeat.stdout, "Повтор должен быть идемпотентным"
+            assert sql(f"SELECT rolpassword FROM pg_authid WHERE rolname = '{user}'") == before
+            extra = bootstrap(mode, user, f"{mode}_extra_db", "original-test-password")
+            assert extra.returncode == 0, extra.stdout + extra.stderr
             assert sql(f"SELECT rolpassword FROM pg_authid WHERE rolname = '{user}'") == before
             wrong = bootstrap(mode, user, f"{mode}_must_not_exist", "wrong-test-password")
             assert wrong.returncode != 0, "Неверный пароль должен приводить к ошибке"
@@ -122,6 +127,16 @@ def main():
                 assert no_admin.returncode == 0, no_admin.stdout + no_admin.stderr
                 no_admin_wrong = bootstrap(mode, user, db, "wrong-test-password", admin=False)
                 assert no_admin_wrong.returncode != 0
+                sql(f"ALTER ROLE {user} CREATEDB VALID UNTIL '2099-01-01'")
+                no_admin_create = bootstrap(mode, user, "no_admin_db", "original-test-password", admin=False)
+                assert no_admin_create.returncode == 0, no_admin_create.stdout + no_admin_create.stderr
+                preserved = bootstrap(mode, user, db, "original-test-password")
+                assert preserved.returncode == 0, preserved.stdout + preserved.stderr
+                assert sql(f"SELECT rolcreatedb AND rolvaliduntil = '2099-01-01'::timestamptz FROM pg_roles WHERE rolname = '{user}'") == "t"
+                sql(f"ALTER DATABASE {db} OWNER TO postgres")
+                no_admin_conflict = bootstrap(mode, user, db, "original-test-password", admin=False)
+                assert no_admin_conflict.returncode != 0
+                sql(f"ALTER DATABASE {db} OWNER TO {user}")
             print(f"OK: {mode}: создание, повтор, неверный пароль, конфликт владельца")
 
         # Trust не должен давать ложное подтверждение совпадения паролей.
