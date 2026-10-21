@@ -7,7 +7,7 @@ bifrost_llm_proxy_chart_version: ""
 bifrost_llm_proxy_release_name: bifrost-llm-proxy
 bifrost_llm_proxy_namespace: default
 bifrost_llm_proxy_create_namespace: true
-bifrost_llm_proxy_atomic: true
+bifrost_llm_proxy_atomic: false
 bifrost_llm_proxy_wait: true
 
 bifrost_llm_proxy_image_repository: docker.io/maximhq/bifrost

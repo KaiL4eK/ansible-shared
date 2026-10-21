@@ -4,6 +4,7 @@ postgresql_init_db_port: 5432
 
 postgresql_init_db_admin_user: ""
 postgresql_init_db_admin_password: ""
+postgresql_init_db_admin_database: postgres
 
 postgresql_init_db_user: ""
 postgresql_init_db_user_password: ""

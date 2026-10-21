@@ -50,7 +50,8 @@
                 command: [/bin/sh, -ec]
                 args:
                   - |
-                    psql --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
+                    # Do not expose generated password-bearing SQL on server errors.
+                    if ! psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 >/dev/null 2>&1 <<'SQL'
                     \getenv app_user APP_DB_USER
                     \getenv app_password APP_DB_PASSWORD
                     \getenv app_database APP_DATABASE
@@ -61,8 +62,40 @@
                     )
                     \gexec
 
-                    SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'app_user', :'app_password')
-                    \gexec
+                    SQL
+                    then
+                      echo 'PostgreSQL user bootstrap failed; existing password was not changed.' >&2
+                      exit 1
+                    fi
+
+                    if ! PGUSER="$APP_DB_USER" PGPASSWORD="$APP_DB_PASSWORD" \
+                      psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 \
+                      --command='SELECT 1' >/dev/null 2>&1; then
+                      echo 'Application database authentication failed; existing password was not changed.' >&2
+                      exit 1
+                    fi
+
+                    if PGUSER="$APP_DB_USER" PGPASSWORD="${APP_DB_PASSWORD}__bootstrap_invalid__" \
+                      psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 \
+                      --command='SELECT 1' >/dev/null 2>&1; then
+                      echo 'PostgreSQL accepted an incorrect password; configure password authentication.' >&2
+                      exit 1
+                    fi
+
+                    psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
+                    \getenv app_user APP_DB_USER
+                    \getenv app_database APP_DATABASE
+
+                    SELECT EXISTS (
+                      SELECT FROM pg_catalog.pg_database
+                      WHERE datname = :'app_database'
+                        AND pg_catalog.pg_get_userbyid(datdba) <> :'app_user'
+                    ) AS owner_conflict
+                    \gset
+                    \if :owner_conflict
+                      \echo 'Existing database has a different owner; bootstrap must not change it.'
+                      \quit 1
+                    \endif
 
                     SELECT format('CREATE DATABASE %I OWNER %I', :'app_database', :'app_user')
                     WHERE NOT EXISTS (
@@ -70,8 +103,6 @@
                     )
                     \gexec
 
-                    SELECT format('ALTER DATABASE %I OWNER TO %I', :'app_database', :'app_user')
-                    \gexec
                     SQL
                 env:
                   - name: PGHOST
