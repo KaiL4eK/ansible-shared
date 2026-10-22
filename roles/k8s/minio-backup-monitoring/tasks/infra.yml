@@ -108,6 +108,7 @@
         SOURCE_MINIO_ENDPOINT: "{{ minio_backup_monitoring_source_endpoint }}"
         SOURCE_MINIO_ACCESS_KEY: "{{ minio_backup_monitoring_source_access_key }}"
         SOURCE_MINIO_SECRET_KEY: "{{ minio_backup_monitoring_source_secret_key }}"
+        TEAMS_WEBHOOK_URL: "{{ minio_backup_monitoring_teams_webhook_url }}"
         JOB_PACKAGES: "{{ minio_backup_monitoring_job_packages | join(' ') }}"
   no_log: true
 

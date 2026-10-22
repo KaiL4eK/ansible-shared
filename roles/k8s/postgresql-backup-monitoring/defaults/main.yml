@@ -6,7 +6,10 @@ backup_monitoring_backup_schedule: "0 8 * * 5"  # noqa var-naming[no-role-prefix
 backup_monitoring_check_schedule: "0 18 * * *"  # noqa var-naming[no-role-prefix]
 backup_monitoring_timezone: Europe/Moscow  # noqa var-naming[no-role-prefix]
 
-backup_monitoring_job_image: postgres:17-alpine  # noqa var-naming[no-role-prefix]
+# Версия pg_dump/pg_restore обязана совпадать с мажор-минором сервера-источника:
+# плавающий 17-alpine привозил pg_dump 17.10 при сервере 17.6, а его рендер
+# opclass без схемы ломал restore на trgm-индексах (ADR-49).
+backup_monitoring_job_image: postgres:17.6-alpine  # noqa var-naming[no-role-prefix]
 backup_monitoring_db_image_repository: bitnamilegacy/postgresql  # noqa var-naming[no-role-prefix]
 backup_monitoring_db_image_tag: 17.6.0-debian-12-r4  # noqa var-naming[no-role-prefix]
 backup_monitoring_storage_class: nfs  # noqa var-naming[no-role-prefix]

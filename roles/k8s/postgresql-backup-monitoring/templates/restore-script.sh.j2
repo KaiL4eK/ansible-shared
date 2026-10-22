@@ -55,6 +55,22 @@ SQL
   done < "${ext_list_path}"
 }
 
+# Сводка ошибок pg_restore для diag-вывода: только строки ошибок самого
+# pg_restore и итоговое число ignored, без COMMAND/Command was-строк (там
+# DDL и произвольные тексты из данных). Fallback на хвост файла — на случай
+# нестандартного формата.
+summarize_pg_restore_errors() {
+  stderr_path="$1"
+
+  summary="$(grep -E '^pg_restore: (error|\[archiver|warning: errors ignored)' "${stderr_path}" | head -n 20 | tr '\n' ' ')"
+  if [ -n "${summary}" ]; then
+    printf '%s' "${summary}"
+    return 0
+  fi
+
+  tail -n 3 "${stderr_path}" | tr '\n' ' '
+}
+
 # Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
 # LOCK_MAX_AGE_SECONDS (activeDeadlineSeconds), брошенный лок забираем сами
 acquire_lock() {
@@ -204,7 +220,9 @@ if [ -s "${ext_list_path}" ]; then
 fi
 
 log_info "restoring database ${RESTORE_DB_NAME} from ${DUMP_FILE}"
-PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
+pg_restore_stderr_path="${RESTORE_WORK_DIR}/pg_restore.err"
+
+if ! PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
   -h "${SOURCE_DB_HOST}" \
   -p "${SOURCE_DB_PORT}" \
   -U "${SOURCE_DB_USER}" \
@@ -215,6 +233,11 @@ PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
   --no-owner \
   --no-privileges \
   --use-list="${toc_filtered_path}" \
-  "${DUMP_PATH}"
+  "${DUMP_PATH}" >/dev/null 2>"${pg_restore_stderr_path}"; then
+  printf 'restore failed for %s as %s: %s\n' \
+    "${RESTORE_DB_NAME}" "${DB_OWNER}" \
+    "$(summarize_pg_restore_errors "${pg_restore_stderr_path}")" >&2
+  exit 1
+fi
 
 log_info "database ${RESTORE_DB_NAME} successfully restored from ${BACKUP_NAME}"

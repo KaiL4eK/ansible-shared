@@ -136,6 +136,8 @@
         SOURCE_DB_USER: "{{ backup_monitoring_source_db_user }}"
         SOURCE_DB_PASSWORD: "{{ backup_monitoring_source_db_password }}"
         SOURCE_DB_NAME: "{{ backup_monitoring_source_db_name }}"
+        TEAMS_WEBHOOK_URL: "{{ backup_monitoring_teams_webhook_url }}"
+  no_log: true
 
 - name: Ensure PostgreSQL backup monitoring check runtime Secret exists
   kubernetes.core.k8s:
@@ -158,6 +160,7 @@
         CHECK_DB_PASSWORD: "{{ backup_monitoring_db_admin_password }}"
         CHECK_DB_NAME: "{{ backup_monitoring_check_db_name }}"
         TEAMS_WEBHOOK_URL: "{{ backup_monitoring_teams_webhook_url }}"
+  no_log: true
 
 - name: Ensure PostgreSQL backup monitoring backup script ConfigMap exists
   kubernetes.core.k8s:

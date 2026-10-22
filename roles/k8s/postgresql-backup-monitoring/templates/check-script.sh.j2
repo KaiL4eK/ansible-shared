@@ -175,6 +175,22 @@ WHERE c.relkind IN ('r', 'p')
 SQL
 }
 
+# Сводка ошибок pg_restore для diag-вывода: только строки ошибок самого
+# pg_restore и итоговое число ignored, без COMMAND/Command was-строк (там
+# DDL и произвольные тексты из данных). Fallback на хвост файла — на случай
+# нестандартного формата.
+summarize_pg_restore_errors() {
+  stderr_path="$1"
+
+  summary="$(grep -E '^pg_restore: (error|\[archiver|warning: errors ignored)' "${stderr_path}" | head -n 20 | tr '\n' ' ')"
+  if [ -n "${summary}" ]; then
+    printf '%s' "${summary}"
+    return 0
+  fi
+
+  tail -n 3 "${stderr_path}" | tr '\n' ' '
+}
+
 sanitize_json() {
   printf '%s' "$1" | tr '\n' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -397,7 +413,7 @@ while IFS='|' read -r source_db_name db_owner dump_file; do
     --no-privileges \
     --use-list="${toc_filtered_path}" \
     "${dump_path}" >/dev/null 2>"${pg_restore_stderr_path}"; then
-    finish "failed" "restore failed for ${source_db_name} as ${db_owner}: $(tail -n 3 "${pg_restore_stderr_path}" | tr '\n' ' ')"
+    finish "failed" "restore failed for ${source_db_name} as ${db_owner}: $(summarize_pg_restore_errors "${pg_restore_stderr_path}")"
   fi
 
   actual_owner="$(get_db_owner "${CURRENT_RESTORE_DB}")"

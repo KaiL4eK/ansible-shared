@@ -19,6 +19,7 @@ BUCKETS_PATH="${STAGING_DIR}/.buckets.txt"
 BUCKETS_TSV_PATH="${STAGING_DIR}/buckets.tsv"
 BACKUP_META_PATH="${STAGING_DIR}/backup-meta.txt"
 MIRRORED_BUCKET_COUNT=0
+ACQUIRED_LOCK=0
 
 log_info() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -141,7 +142,9 @@ cleanup() {
   if [ -n "${STAGING_DIR}" ] && [ -d "${STAGING_DIR}" ]; then
     rm -rf "${STAGING_DIR}" >/dev/null 2>&1 || true
   fi
-  release_lock
+  if [ "${ACQUIRED_LOCK}" = "1" ]; then
+    release_lock
+  fi
 }
 
 prune_old_backups() {
@@ -158,6 +161,58 @@ prune_old_backups() {
     rm -rf "${backup_dir}" >/dev/null 2>&1 || true
   done
 }
+
+sanitize_json() {
+  printf '%s' "$1" | tr '\n' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# Падение бэкапа алертится сразу отсюда: без этого check узнал бы о нём
+# только через stale-порог свежести (дни). Причина провала всегда попадает
+# в логи пода — карточка ссылается на них
+notify_failure() {
+  exit_code="$1"
+
+  if [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+    return 0
+  fi
+
+  safe_hostname="$(sanitize_json "$(hostname)")"
+  safe_backup="$(sanitize_json "backup-${TIMESTAMP}")"
+  payload=$(cat <<EOF
+{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"E81123","summary":"MinIO backup failed","title":"MinIO backup failed","sections":[{"facts":[{"name":"Host","value":"${safe_hostname}"},{"name":"Status","value":"failed (exit ${exit_code})"},{"name":"Backup","value":"${safe_backup}"}],"text":"MinIO backup job failed with exit code ${exit_code}. See the job pod logs for the failing step."}]}
+EOF
+)
+
+  if ! command -v curl >/dev/null 2>&1 && command -v apk >/dev/null 2>&1; then
+    apk add --no-cache curl >/dev/null 2>&1 || true
+  fi
+
+  # Таймауты обязательны: EXIT-трап ждёт curl, зависший POST задержал бы
+  # выход джоба и освобождение NFS-лока вплоть до activeDeadlineSeconds
+  curl -fsS --connect-timeout 5 --max-time 15 -X POST \
+    -H 'Content-Type: application/json' \
+    -d "${payload}" \
+    "${TEAMS_WEBHOOK_URL}" >/dev/null 2>&1 \
+    || printf 'teams notification was not sent (curl unavailable or webhook request failed)\n' >&2
+}
+
+on_exit() {
+  exit_code="$1"
+
+  if [ "${exit_code}" -ne 0 ]; then
+    notify_failure "${exit_code}"
+  fi
+
+  cleanup
+}
+
+# Трапы ставятся до JOB_PACKAGES и проверки mc: уведомлять нужно и о ранних
+# падениях (пакеты не установились, занят лок). INT/TERM переведены в явный
+# exit, чтобы EXIT-трап увидел ненулевой код при убийстве пода
+# activeDeadlineSeconds
+trap 'on_exit $?' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 if [ -n "${JOB_PACKAGES:-}" ]; then
   apk add --no-cache ${JOB_PACKAGES} >/dev/null
@@ -180,7 +235,7 @@ if ! acquire_lock "backup-${TIMESTAMP}"; then
   exit 1
 fi
 
-trap cleanup EXIT INT TERM
+ACQUIRED_LOCK=1
 
 mc alias set "${SOURCE_ALIAS}" \
   "${SOURCE_MINIO_ENDPOINT}" \
