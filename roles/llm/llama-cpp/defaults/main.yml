@@ -1,3 +1,4 @@
+---
 llama_cpp_use_gpu: true
 
 # https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp
@@ -6,6 +7,38 @@ llama_cpp_version: server-cuda
 
 # Set to false when a locally built image is used (e.g. llama.cpp:server-cuda-mtp)
 llama_cpp_pull_enabled: true
+
+# Optional Bearer API key; rendered into the role-managed .env (mode 0600)
+# and consumed by llama-server via LLAMA_API_KEY. /health stays public.
+# Example: "{{ vault_api_key }}"
+llama_cpp_api_key: ""
+
+# Compose healthcheck start period; the first start may download model
+# weights, which can take a long time for large GGUF files. Example: 1h
+llama_cpp_healthcheck_start_period: 30s
+
+# --- Local image build -------------------------------------------------------
+# Prebuilt llama.cpp images do not cover every GPU; NVIDIA DGX Spark (GB10,
+# sm_121a) for example requires a CUDA 13 build with CMAKE_CUDA_ARCHITECTURES=121a.
+# Enable the build to clone, compile llama-server on the target host and run it
+# from the resulting image instead of llama_cpp_image:llama_cpp_version.
+llama_cpp_build_enabled: false
+llama_cpp_source_repo: https://github.com/ggml-org/llama.cpp.git
+# Full 40-hex commit SHA of the source to build.
+llama_cpp_revision: null
+# Optional Ansible host architecture check, e.g. aarch64.
+llama_cpp_required_architecture: null
+# CUDA build/runtime image version; GB10 needs 13.x for sm_121a.
+llama_cpp_cuda_version: 13.0.2
+# CMake CUDA target, e.g. 121a for DGX Spark GB10.
+llama_cpp_cuda_architectures: null
+llama_cpp_build_parallelism: 2
+# Extra CMake defines for the build.
+# Example: {GGML_CUDA_FA_ALL_QUANTS: "ON"} to support flash attention with
+# quantized (q8_0) KV cache on CUDA.
+llama_cpp_build_config: {}
+# Optional explicit image name; otherwise derive it from source and Dockerfile.
+llama_cpp_build_image: null
 
 llama_cpp_port: 8080
 llama_cpp_host: 0.0.0.0
@@ -45,3 +78,8 @@ llama_cpp_compose_project_name: "{{ ansible_remote_dir | basename }}"
 # Keep cache files isolated per deployment under ansible_remote_dir/model
 llama_cpp_host_models_dir: "{{ ansible_remote_dir }}/model"
 llama_cpp_container_models_dir: /models
+
+# Internal state shared between the prepare and start steps.
+llama_cpp_effective_image: null
+llama_cpp_source_checkout: {}
+llama_cpp_build_rendered: {}

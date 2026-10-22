@@ -1,0 +1,25 @@
+FROM docker.io/nvidia/cuda:{{ llama_cpp_cuda_version }}-devel-ubuntu24.04 AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ca-certificates libssl-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+# The build container has no GPU driver; link CUDA targets against the stub
+# library shipped with the toolkit, otherwise CMake fails to link libcuda.
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+{% set cmake_extra = (llama_cpp_build_config | default({})).items() | map('printf', '-D%s=%s') | join(' ') %}
+RUN cmake -S . -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DLLAMA_BUILD_TESTS=OFF \
+    -DCMAKE_CUDA_ARCHITECTURES={{ llama_cpp_cuda_architectures | quote }} \
+    -DCMAKE_BUILD_TYPE=Release \
+    {{ cmake_extra }} \
+    && cmake --build build --target llama-server --parallel {{ llama_cpp_build_parallelism }}
+
+FROM docker.io/nvidia/cuda:{{ llama_cpp_cuda_version }}-runtime-ubuntu24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/build/bin/llama-server /usr/local/bin/llama-server

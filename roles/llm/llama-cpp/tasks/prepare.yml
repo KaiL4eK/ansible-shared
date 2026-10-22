@@ -1,0 +1,96 @@
+---
+- name: Validate service configuration
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_hf_model_repo is defined
+      - llama_cpp_hf_model_repo | length > 0
+      - llama_cpp_port | int > 0 and llama_cpp_port | int < 65536
+      - llama_cpp_healthcheck_start_period | string | length > 0
+    fail_msg: "llama_cpp_hf_model_repo must be set and the port must be valid"
+
+- name: Validate build configuration
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_revision is string and llama_cpp_revision is match('^[a-f0-9]{40}$')
+      - llama_cpp_cuda_architectures is not none
+      - llama_cpp_cuda_architectures | string | length > 0
+      - llama_cpp_cuda_version | string | length > 0
+      - llama_cpp_build_parallelism | int > 0
+    fail_msg: "Provide a pinned source revision, CUDA version and target for the local build."
+  when: llama_cpp_build_enabled | bool
+
+- name: Validate requested host architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture == llama_cpp_required_architecture
+    fail_msg: "Host architecture does not match the requested build target."
+  when: llama_cpp_required_architecture is not none
+
+- name: Ensure working dir exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ansible_remote_dir }}"
+    - "{{ llama_cpp_host_models_dir }}"
+
+- name: Check out pinned llama.cpp source
+  ansible.builtin.git:
+    repo: "{{ llama_cpp_source_repo }}"
+    dest: "{{ ansible_remote_dir }}/src"
+    version: "{{ llama_cpp_revision }}"
+  register: llama_cpp_source_checkout
+  when: llama_cpp_build_enabled | bool
+
+- name: Write CUDA Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ ansible_remote_dir }}/Dockerfile"
+    mode: "0644"
+  register: llama_cpp_build_rendered
+  when: llama_cpp_build_enabled | bool
+
+- name: Select effective container image
+  ansible.builtin.set_fact:
+    llama_cpp_effective_image: >-
+      {{ llama_cpp_build_image if llama_cpp_build_image
+         else ('local/llama-cpp:' ~ llama_cpp_revision[:12] ~ '-' ~ llama_cpp_build_rendered.checksum[:12])
+         if llama_cpp_build_enabled | bool
+         else (llama_cpp_image ~ ':' ~ llama_cpp_version) }}
+
+- name: Build llama-server image
+  community.docker.docker_image_build:
+    name: "{{ llama_cpp_effective_image }}"
+    path: "{{ ansible_remote_dir }}/src"
+    dockerfile: ../Dockerfile
+    rebuild: >-
+      {{ 'always' if (llama_cpp_build_image and
+         (llama_cpp_build_rendered.changed or llama_cpp_source_checkout.changed))
+         else 'never' }}
+  when: llama_cpp_build_enabled | bool
+
+- name: Create .env file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ ansible_remote_dir }}/.env"
+    mode: '0600'
+
+- name: Create docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ ansible_remote_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Create llama-cpp start script
+  ansible.builtin.template:
+    src: start-llama.sh.j2
+    dest: "{{ ansible_remote_dir }}/start-llama.sh"
+    mode: '0755'
+
+- name: Pull images
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ ansible_remote_dir }}"
+  when:
+    - not (llama_cpp_build_enabled | bool)
+    - llama_cpp_pull_enabled | default(true)

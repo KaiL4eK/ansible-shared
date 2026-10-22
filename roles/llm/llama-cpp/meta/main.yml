@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: llama_cpp
+  author: Alexey Devyatkin
+  description: llama.cpp server with pinned GGUF models and optional on-host image builds
+  license: MIT
+  min_ansible_version: "2.17"
+dependencies: []

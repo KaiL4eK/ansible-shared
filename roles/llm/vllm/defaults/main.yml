@@ -13,6 +13,10 @@ vllm_port: 8000
 vllm_image: vllm/vllm-openai
 vllm_version: v0.16.0
 vllm_compose_wait_timeout: 1800
+# Compose healthcheck start period; the first start compiles the model
+# (torch.compile), which can take longer than the default window.
+# Example: 10m
+vllm_healthcheck_start_period: 30s
 # vllm/vllm-openai's ENTRYPOINT already runs "vllm serve", so command: starts
 # with the model name. nvcr.io/nvidia/vllm uses the generic NVIDIA container
 # entrypoint (/opt/nvidia/nvidia_entrypoint.sh), which execs command: verbatim
