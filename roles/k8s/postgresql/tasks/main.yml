@@ -9,6 +9,7 @@
       - k8s_postgresql_image_values is mapping
       - k8s_postgresql_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
       - k8s_postgresql_resources is mapping
+      - k8s_postgresql_startup_probe is mapping
       - k8s_postgresql_resources | length == 0 or k8s_postgresql_resources.keys() | intersect(['requests', 'limits']) | length > 0
       - k8s_postgresql_storage_class is string
       - k8s_postgresql_storage_size | length > 0
@@ -71,6 +72,7 @@
         extendedConfiguration: "{{ _k8s_postgresql_extended_conf }}"
         resourcesPreset: "{{ 'none' if (k8s_postgresql_resources | length > 0) else k8s_postgresql_resources_preset }}"
         resources: "{{ k8s_postgresql_resources }}"
+        startupProbe: "{{ k8s_postgresql_startup_probe }}"
         nodeSelector: "{{ k8s_postgresql_node_selector }}"
         persistence:
           enabled: "{{ k8s_postgresql_persistence_enabled | bool }}"

@@ -12,6 +12,8 @@ k8s_postgresql_enable_postgres_user: true
 k8s_postgresql_resources_preset: small
 # Явные requests/limits; при непустом значении имеют приоритет над resourcesPreset
 k8s_postgresql_resources: {}
+# Пустой map сохраняет defaults primary.startupProbe выбранного чарта.
+k8s_postgresql_startup_probe: {}
 k8s_postgresql_persistence_enabled: true
 k8s_postgresql_storage_class: nfs-primary
 k8s_postgresql_storage_size: 10Gi
