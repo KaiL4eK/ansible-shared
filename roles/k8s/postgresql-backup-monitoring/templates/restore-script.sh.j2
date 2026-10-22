@@ -39,18 +39,22 @@ run_psql_on_db() {
 # Расширения из дампа восстанавливаются не через pg_restore: не-trusted
 # расширения (например pg_stat_statements) может создавать только
 # суперпользователь, а restore идёт с SET ROLE владельца базы. TOC-записи
-# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь.
+# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь
+# — В ТОЙ ЖЕ СХЕМЕ, что и в источнике (WITH SCHEMA из дампа): pg_dump
+# рендерит opclass/функции расширения unqualified, если оно живёт в
+# pg_catalog (всегда видимом), а pg_restore выполняет restore с пустым
+# search_path — расширение в public сломало бы резолв (ADR-49).
 precreate_extensions() {
   target_db="$1"
   ext_list_path="$2"
 
   [ -s "${ext_list_path}" ] || return 0
 
-  while IFS= read -r ext_name; do
+  while IFS='|' read -r ext_name ext_schema; do
     [ -n "${ext_name}" ] || continue
-    log_info "creating extension ${ext_name} in ${target_db} as superuser"
-    run_psql_on_db "${target_db}" -v ext_name="${ext_name}" <<'SQL'
-SELECT format('CREATE EXTENSION IF NOT EXISTS %I', :'ext_name') \gexec
+    log_info "creating extension ${ext_name} (schema ${ext_schema}) in ${target_db} as superuser"
+    run_psql_on_db "${target_db}" -v ext_name="${ext_name}" -v ext_schema="${ext_schema}" <<'SQL'
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I WITH SCHEMA %I', :'ext_name', :'ext_schema') \gexec
 SQL
   done < "${ext_list_path}"
 }
@@ -209,7 +213,11 @@ sed -E \
   -e '/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - /d' \
   -e '/^[0-9]+; [0-9]+ [0-9]+ COMMENT - EXTENSION /d' \
   "${toc_path}" > "${toc_filtered_path}"
-sed -n -E 's/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - ([A-Za-z0-9_.-]+).*/\1/p' "${toc_path}" > "${ext_list_path}"
+# Схема каждого расширения берётся из дампа (--section=pre-data: дёшево,
+# без COPY-данных): precreate обязан воспроизвести схему источника
+pg_restore -f - --section=pre-data "${DUMP_PATH}" 2>/dev/null \
+  | sed -n 's/^CREATE EXTENSION IF NOT EXISTS \([A-Za-z0-9_.-][A-Za-z0-9_.-]*\) WITH SCHEMA \([A-Za-z0-9_]*\);.*/\1|\2/p' \
+  > "${ext_list_path}"
 
 if [ -s "${ext_list_path}" ]; then
   log_info "pre-creating extensions for ${RESTORE_DB_NAME}: $(tr '\n' ' ' < "${ext_list_path}")"
