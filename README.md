@@ -28,6 +28,13 @@ Before working with this repository, install Ansible dependencies:
 
 ## Current Content
 
+- `roles/k8s/postgresql-backup-monitoring/tasks/restore-isolated.yml` —
+  восстановление одной БД в пустой отдельный PostgreSQL. Входы:
+  `backup_monitoring_isolated_target_namespace`, `*_target_release`, `*_target_host`,
+  `*_admin_password`, имя бэкапа и request id. Проверяет Service назначения,
+  не использует production Secret, удаляет временные credentials в `always`.
+  Существующие БД/Job не перезаписывает. Старый `restore.yml` не изменён.
+
 - `roles/postgresql/init-db/` — прямое создание отсутствующих PostgreSQL user/DB;
   существующий пароль не меняется, ошибка проверки credentials останавливает
   bootstrap. Такой же контракт у `roles/k8s/postgresql_init_db/`.
@@ -55,7 +62,7 @@ Before working with this repository, install Ansible dependencies:
   управляет доступом к группе `docker`.
 - `roles/k8s/postgresql/` deploys PostgreSQL to Kubernetes via the Bitnami
   Helm chart (fixed chart and image versions, optional metrics sidecar with
-  ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
+   ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
 - `roles/k8s/postgresql_init_db/` creates a PostgreSQL login-role and database
   through a short-lived in-cluster Job using a pinned official PostgreSQL client
   image; поддерживает готовые Secrets без изменения их жизненного цикла и передачу

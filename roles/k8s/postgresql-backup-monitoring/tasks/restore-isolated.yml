@@ -1,0 +1,153 @@
+---
+- name: Проверить параметры изолированного восстановления
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_isolated_target_namespace | length > 0
+      - backup_monitoring_isolated_target_namespace not in ['service', 'apps', 'apps-llm', 'apps-stage']
+      - backup_monitoring_isolated_target_namespace != backup_monitoring_namespace
+      - backup_monitoring_isolated_target_release is match('^[a-z0-9][a-z0-9-]*$')
+      - >-
+        backup_monitoring_isolated_target_host ==
+        backup_monitoring_isolated_target_release ~ '.' ~ backup_monitoring_isolated_target_namespace ~ '.svc.cluster.local'
+      - backup_monitoring_isolated_target_host != backup_monitoring_source_db_host
+      - backup_monitoring_restore_target_db_name | length > 0
+      - backup_monitoring_restore_target_db_name not in ['postgres', 'template0', 'template1']
+      - backup_monitoring_restore_backup_name is match('^backup-[0-9]{8}-[0-9]{6}$')
+      - backup_monitoring_restore_request_id is match('^[a-z0-9][a-z0-9-]{0,29}$')
+      - backup_monitoring_restore_active_deadline_seconds | int > 0
+      - backup_monitoring_lock_max_age_seconds | int > backup_monitoring_restore_active_deadline_seconds | int
+
+- name: Проверить отдельный пароль резервного экземпляра
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_isolated_admin_password | length > 0
+  no_log: true
+
+- name: Проверить Service резервной PostgreSQL
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Service
+    namespace: "{{ backup_monitoring_isolated_target_namespace }}"
+    name: "{{ backup_monitoring_isolated_target_release }}"
+  register: backup_monitoring_isolated_service  # noqa: var-naming[no-role-prefix]
+
+- name: Убедиться что Service выбирает нужный резервный релиз
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_isolated_service.resources | length == 1
+      - backup_monitoring_isolated_service.resources[0].spec.type == 'ClusterIP'
+      - >-
+        backup_monitoring_isolated_service.resources[0].spec.selector['app.kubernetes.io/instance'] ==
+        backup_monitoring_isolated_target_release
+      - backup_monitoring_isolated_service.resources[0].spec.selector['app.kubernetes.io/name'] == 'postgresql'
+
+- name: Проверить отсутствие ранее созданной restore Job
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ backup_monitoring_namespace }}"
+    name: "isolated-restore-{{ backup_monitoring_restore_request_id }}"
+  register: backup_monitoring_isolated_previous_job  # noqa: var-naming[no-role-prefix]
+
+- name: Запретить неявный повтор восстановления
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_isolated_previous_job.resources | length == 0
+    fail_msg: Restore Job уже существует. Проверьте результат предыдущего запуска; автоматического удаления и повтора нет.
+
+- name: Создать ресурсы и дождаться изолированного восстановления
+  block:
+    - name: Создать скрипт изолированного восстановления
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "isolated-restore-{{ backup_monitoring_restore_request_id }}"
+            namespace: "{{ backup_monitoring_namespace }}"
+          data:
+            restore.sh: "{{ lookup('template', 'isolated-restore-script.sh.j2') }}"
+
+    - name: Создать уникальный временный Secret только с резервными credentials
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            generateName: isolated-restore-
+            namespace: "{{ backup_monitoring_namespace }}"
+          type: Opaque
+          stringData:
+            password: "{{ backup_monitoring_isolated_admin_password }}"
+      register: backup_monitoring_isolated_secret  # noqa: var-naming[no-role-prefix]
+      no_log: true
+      diff: false
+
+    - name: Запустить изолированную restore Job
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'isolated-restore-job.yml.j2') | from_yaml }}"
+      no_log: true
+
+    - name: Дождаться завершения restore Job
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: "{{ backup_monitoring_namespace }}"
+        name: "isolated-restore-{{ backup_monitoring_restore_request_id }}"
+      register: backup_monitoring_isolated_job  # noqa: var-naming[no-role-prefix]
+      until: >-
+        backup_monitoring_isolated_job.resources | length == 1 and
+        (backup_monitoring_isolated_job.resources[0].status.conditions | default([]) |
+         selectattr('type', 'in', ['Complete', 'Failed']) | selectattr('status', 'equalto', 'True') | list | length > 0)
+      retries: "{{ (backup_monitoring_restore_active_deadline_seconds | int // 10) + 12 }}"
+      delay: 10
+
+    - name: Проверить успех восстановления
+      ansible.builtin.assert:
+        that:
+          - backup_monitoring_isolated_job.resources[0].status.succeeded | default(0) | int == 1
+        fail_msg: >-
+          Восстановление не завершилось успешно. Проверьте логи isolated-restore-{{ backup_monitoring_restore_request_id }}
+          в namespace {{ backup_monitoring_namespace }}. Продовая БД не является целью этой Job.
+  always:
+    - name: Остановить Job перед удалением credentials если ожидание прервано
+      kubernetes.core.k8s:
+        state: absent
+        wait: true
+        delete_options:
+          propagationPolicy: Foreground
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "isolated-restore-{{ backup_monitoring_restore_request_id }}"
+            namespace: "{{ backup_monitoring_namespace }}"
+      when: >-
+        backup_monitoring_isolated_job is not defined or
+        backup_monitoring_isolated_job.resources | default([]) | length != 1 or
+        (backup_monitoring_isolated_job.resources[0].status.conditions | default([]) |
+         selectattr('type', 'in', ['Complete', 'Failed']) | selectattr('status', 'equalto', 'True') | list | length == 0)
+
+    - name: Удалить только созданный временный Secret
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        namespace: "{{ backup_monitoring_namespace }}"
+        name: "{{ backup_monitoring_isolated_secret.result.metadata.name }}"
+      when:
+        - backup_monitoring_isolated_secret is defined
+        - backup_monitoring_isolated_secret.result is defined
+      no_log: true
+      diff: false
+
+    - name: Удалить временный скрипт после завершения Job
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        namespace: "{{ backup_monitoring_namespace }}"
+        name: "isolated-restore-{{ backup_monitoring_restore_request_id }}"

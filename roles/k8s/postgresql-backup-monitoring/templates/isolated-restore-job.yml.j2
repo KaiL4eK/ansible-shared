@@ -1,0 +1,57 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: isolated-restore-{{ backup_monitoring_restore_request_id }}
+  namespace: {{ backup_monitoring_namespace }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ backup_monitoring_restore_active_deadline_seconds }}
+  ttlSecondsAfterFinished: {{ backup_monitoring_job_ttl_seconds }}
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: restore
+          image: {{ backup_monitoring_job_image | to_json }}
+          command: [/bin/sh, /scripts/restore.sh]
+          resources: {{ backup_monitoring_isolated_resources | to_json }}
+          env:
+            - name: PGHOST
+              value: {{ backup_monitoring_isolated_target_host | to_json }}
+            - name: EXPECTED_HOST
+              value: {{ (backup_monitoring_isolated_target_release ~ '.' ~ backup_monitoring_isolated_target_namespace ~ '.svc.cluster.local') | to_json }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: postgres
+            - name: PGDATABASE
+              value: postgres
+            - name: PGCONNECT_TIMEOUT
+              value: "10"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ backup_monitoring_isolated_secret.result.metadata.name }}
+                  key: password
+            - name: RESTORE_DATABASE
+              value: {{ backup_monitoring_restore_target_db_name | to_json }}
+            - name: BACKUP_NAME
+              value: {{ backup_monitoring_restore_backup_name | to_json }}
+            - name: LOCK_DIR_NAME
+              value: {{ backup_monitoring_lock_dir_name | to_json }}
+          volumeMounts:
+            - name: backups
+              mountPath: /backups
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ backup_monitoring_backup_pvc_name }}
+        - name: scripts
+          configMap:
+            name: isolated-restore-{{ backup_monitoring_restore_request_id }}
+            defaultMode: 0555

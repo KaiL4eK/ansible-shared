@@ -75,3 +75,16 @@ backup_monitoring_restore_backup_name: ""  # noqa var-naming[no-role-prefix]
 backup_monitoring_restore_request_id: manual  # noqa var-naming[no-role-prefix]
 backup_monitoring_restore_wait_retries: 180  # noqa var-naming[no-role-prefix]
 backup_monitoring_restore_wait_delay: 10  # noqa var-naming[no-role-prefix]
+
+# Отдельная точка входа restore-isolated: не использует production SOURCE_DB_*.
+backup_monitoring_isolated_target_namespace: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_isolated_target_release: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_isolated_target_host: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_isolated_admin_password: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_isolated_resources:  # noqa var-naming[no-role-prefix]
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+fail() { printf '%s\n' "$*" >&2; exit 1; }
+psql_safe() { psql -X -v ON_ERROR_STOP=1 "$@"; }
+
+[ "${PGHOST}" = "${EXPECTED_HOST}" ] || fail 'Целевой адрес не совпадает с разрешённым резервным экземпляром'
+case "${BACKUP_NAME}" in
+  backup-????????-??????) ;;
+  *) fail 'Нужно конкретное имя бэкапа' ;;
+esac
+case "${RESTORE_DATABASE}" in
+  ''|postgres|template0|template1) fail 'Недопустимая целевая БД' ;;
+esac
+
+# Общий лок нужен для защиты выбранной копии от retention. Дампы не изменяем.
+# Не перехватываем даже старый лок: параллельный backup/check/restore запрещён.
+LOCK_DIR="/backups/${LOCK_DIR_NAME}"
+mkdir "${LOCK_DIR}" 2>/dev/null || fail 'Backup lock занят; восстановление не начато'
+cleanup() { rm -f "${LOCK_DIR}/owner"; rmdir "${LOCK_DIR}" || true; }
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+printf 'isolated-restore %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+
+BACKUP_PATH="/backups/${BACKUP_NAME}"
+[ -f "${BACKUP_PATH}/db-owners.tsv" ] || fail 'Нет db-owners.tsv'
+[ -f "${BACKUP_PATH}/roles.sql" ] || fail 'Нет roles.sql'
+DB_OWNER=''
+DUMP_FILE=''
+while IFS='|' read -r source_db owner dump; do
+  [ "${source_db}" = "${RESTORE_DATABASE}" ] || continue
+  [ -z "${DUMP_FILE}" ] || fail 'Повторяющаяся БД в манифесте'
+  DB_OWNER="${owner}"
+  DUMP_FILE="${dump}"
+done < "${BACKUP_PATH}/db-owners.tsv"
+[ -n "${DB_OWNER}" ] && [ -n "${DUMP_FILE}" ] || fail 'БД не найдена в манифесте'
+case "${DUMP_FILE}" in
+  */*|.*) fail 'Недопустимый путь дампа' ;;
+esac
+[ -f "${BACKUP_PATH}/${DUMP_FILE}" ] || fail 'Нет файла дампа'
+pg_restore --list "${BACKUP_PATH}/${DUMP_FILE}" >/dev/null 2>&1 || fail 'Дамп не читается'
+
+# Разрешён только пустой экземпляр. Никаких DROP DATABASE / terminate backend.
+database_count="$(psql_safe -Atc "SELECT count(*) FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres';")"
+[ "${database_count}" = '0' ] || fail 'Целевой экземпляр не пуст; удаление или перезапись запрещены'
+
+printf 'Восстановление ролей в изолированный экземпляр\n'
+# Файл содержит password hashes: ошибки SQL никогда не выводим в pod logs.
+psql_safe -f "${BACKUP_PATH}/roles.sql" >/dev/null 2>&1 || fail 'Не удалось восстановить роли'
+psql_safe -v db_name="${RESTORE_DATABASE}" -v db_owner="${DB_OWNER}" <<'SQL' >/dev/null
+SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_owner') \gexec
+SQL
+
+printf 'Восстановление данных выбранной БД\n'
+pg_restore --exit-on-error --dbname="${RESTORE_DATABASE}" --role="${DB_OWNER}" \
+  --no-owner --no-privileges "${BACKUP_PATH}/${DUMP_FILE}" >/dev/null 2>&1 || fail 'Восстановление не завершено; частичная БД сохранена для диагностики'
+psql_safe -d "${RESTORE_DATABASE}" -c 'ANALYZE;' >/dev/null 2>&1 || fail 'Ошибка ANALYZE'
+psql_safe -d "${RESTORE_DATABASE}" -c 'SELECT 1;' >/dev/null || fail 'Ошибка контрольного запроса'
+printf 'Восстановление успешно. Переключение приложений не выполнялось.\n'
