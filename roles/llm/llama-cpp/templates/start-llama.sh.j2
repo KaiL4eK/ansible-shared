@@ -25,6 +25,9 @@ fi
 
 exec "$LLAMA_SERVER_BIN" \
   --hf-repo "{{ llama_cpp_hf_model_repo }}" \
+{% if llama_cpp_hf_model_file | default('') | trim %}
+  --hf-file "{{ llama_cpp_hf_model_file | trim }}" \
+{% endif %}
   --ctx-size "{{ llama_cpp_ctx_size }}" \
 {% if llama_cpp_gpu_layers | default('') | string | trim %}
   --n-gpu-layers "{{ llama_cpp_gpu_layers }}" \

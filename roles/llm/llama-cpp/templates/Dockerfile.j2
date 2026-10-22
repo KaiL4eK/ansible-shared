@@ -27,4 +27,7 @@ FROM docker.io/nvidia/cuda:{{ llama_cpp_cuda_version }}-runtime-ubuntu24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 curl && rm -rf /var/lib/apt/lists/*
 
+# llama-server links against the shared libraries produced by the build.
+COPY --from=build /src/build/bin/ /usr/local/lib/llama-cpp/
+ENV LD_LIBRARY_PATH=/usr/local/lib/llama-cpp
 COPY --from=build /src/build/bin/llama-server /usr/local/bin/llama-server
