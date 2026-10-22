@@ -17,6 +17,10 @@ llama_cpp_api_key: ""
 # weights, which can take a long time for large GGUF files. Example: 1h
 llama_cpp_healthcheck_start_period: 30s
 
+# Timeout for the Compose wait on service start; must cover the first start
+# model download. Example: 1800
+llama_cpp_compose_wait_timeout: 1800
+
 # --- Local image build -------------------------------------------------------
 # Prebuilt llama.cpp images do not cover every GPU; NVIDIA DGX Spark (GB10,
 # sm_121a) for example requires a CUDA 13 build with CMAKE_CUDA_ARCHITECTURES=121a.

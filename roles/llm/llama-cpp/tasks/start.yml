@@ -20,6 +20,7 @@
     state: present
     remove_orphans: true
     wait: true
+    wait_timeout: "{{ llama_cpp_compose_wait_timeout }}"
 
 - name: Show deployment info
   ansible.builtin.debug:
