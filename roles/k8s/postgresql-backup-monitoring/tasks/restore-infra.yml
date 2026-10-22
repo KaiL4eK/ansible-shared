@@ -1,0 +1,12 @@
+---
+- name: Ensure PostgreSQL backup monitoring restore script ConfigMap exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ backup_monitoring_restore_scripts_configmap_name }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+      data:
+        restore.sh: "{{ lookup('template', 'restore-script.sh.j2') }}"

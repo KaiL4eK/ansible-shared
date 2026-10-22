@@ -1,0 +1,129 @@
+---
+- name: Assert required MinIO backup monitoring variables are set
+  ansible.builtin.assert:
+    that:
+      - minio_backup_monitoring_source_alias | length > 0
+      - minio_backup_monitoring_source_endpoint | length > 0
+      - minio_backup_monitoring_source_access_key | length > 0
+      - minio_backup_monitoring_source_secret_key | length > 0
+      - minio_backup_monitoring_storage_class | length > 0
+      - minio_backup_monitoring_backup_retention_count | int > 0
+      - minio_backup_monitoring_job_packages is sequence
+      - minio_backup_monitoring_job_packages is not string
+    fail_msg: >-
+      MinIO backup monitoring requires source MinIO connection settings and
+      storage options. Set minio_backup_monitoring_source_endpoint,
+      minio_backup_monitoring_source_access_key,
+      minio_backup_monitoring_source_secret_key and
+      minio_backup_monitoring_storage_class in inventory/group_vars or an
+      encrypted vault. minio_backup_monitoring_job_packages must be a list of
+      Alpine package names installed into the backup jobs at runtime.
+
+- name: Assert MinIO backup monitoring job packages are valid
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+    fail_msg: >-
+      minio_backup_monitoring_job_packages must contain only non-empty
+      Alpine package names.
+  loop: "{{ minio_backup_monitoring_job_packages }}"
+
+- name: Ensure MinIO backup monitoring namespace exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ minio_backup_monitoring_namespace }}"
+
+- name: Ensure MinIO backup monitoring ServiceAccount exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ minio_backup_monitoring_service_account_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+
+- name: Ensure MinIO backup monitoring backup PVC exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ minio_backup_monitoring_backup_pvc_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ minio_backup_monitoring_backup_storage_size }}"
+        storageClassName: "{{ minio_backup_monitoring_storage_class }}"
+
+- name: Ensure MinIO backup monitoring backup runtime Secret exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ minio_backup_monitoring_backup_secret_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+      type: Opaque
+      stringData:
+        BACKUP_ROOT: "{{ minio_backup_monitoring_backup_root }}"
+        LOCK_DIR_NAME: "{{ minio_backup_monitoring_lock_dir_name }}"
+        BACKUP_RETENTION_COUNT: "{{ minio_backup_monitoring_backup_retention_count | string }}"
+        SOURCE_ALIAS: "{{ minio_backup_monitoring_source_alias }}"
+        SOURCE_MINIO_ENDPOINT: "{{ minio_backup_monitoring_source_endpoint }}"
+        SOURCE_MINIO_ACCESS_KEY: "{{ minio_backup_monitoring_source_access_key }}"
+        SOURCE_MINIO_SECRET_KEY: "{{ minio_backup_monitoring_source_secret_key }}"
+        JOB_PACKAGES: "{{ minio_backup_monitoring_job_packages | join(' ') }}"
+  no_log: true
+
+- name: Ensure MinIO backup monitoring check runtime Secret exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ minio_backup_monitoring_check_secret_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+      type: Opaque
+      stringData:
+        BACKUP_ROOT: "{{ minio_backup_monitoring_backup_root }}"
+        LOCK_DIR_NAME: "{{ minio_backup_monitoring_lock_dir_name }}"
+        VERIFICATION_RESULTS_FILE: "{{ minio_backup_monitoring_verification_results_file }}"
+        TEAMS_WEBHOOK_URL: "{{ minio_backup_monitoring_teams_webhook_url }}"
+        JOB_PACKAGES: "{{ minio_backup_monitoring_job_packages | join(' ') }}"
+  no_log: true
+
+- name: Ensure MinIO backup monitoring backup script ConfigMap exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ minio_backup_monitoring_backup_scripts_configmap_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+      data:
+        backup.sh: "{{ lookup('template', 'backup-script.sh.j2') }}"
+
+- name: Ensure MinIO backup monitoring check script ConfigMap exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ minio_backup_monitoring_check_scripts_configmap_name }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+      data:
+        check.sh: "{{ lookup('template', 'check-script.sh.j2') }}"

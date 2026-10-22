@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ backup_monitoring_restore_job_name }}-{{ backup_monitoring_restore_request_id }}
+  namespace: {{ backup_monitoring_namespace }}
+spec:
+  ttlSecondsAfterFinished: {{ backup_monitoring_job_ttl_seconds }}
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ backup_monitoring_service_account_name }}
+      containers:
+        - name: restore
+          image: {{ backup_monitoring_job_image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - /scripts/restore.sh
+          env:
+            - name: RESTORE_DB_NAME
+              value: {{ backup_monitoring_restore_target_db_name | quote }}
+            - name: RESTORE_BACKUP_NAME
+              value: {{ backup_monitoring_restore_backup_name | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ backup_monitoring_backup_secret_name }}
+          volumeMounts:
+            - name: backups
+              mountPath: {{ backup_monitoring_backup_root }}
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ backup_monitoring_backup_pvc_name }}
+        - name: scripts
+          configMap:
+            name: {{ backup_monitoring_restore_scripts_configmap_name }}
+            defaultMode: 0755

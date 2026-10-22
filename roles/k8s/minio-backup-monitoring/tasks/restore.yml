@@ -1,0 +1,57 @@
+---
+- name: Assert MinIO backup restore variables are set
+  ansible.builtin.assert:
+    that:
+      - minio_backup_monitoring_restore_bucket | length > 0
+      - minio_backup_monitoring_restore_request_id | length > 0
+      - minio_backup_monitoring_source_endpoint | length > 0
+      - minio_backup_monitoring_source_access_key | length > 0
+      - minio_backup_monitoring_source_secret_key | length > 0
+    fail_msg: >-
+      MinIO backup restore requires minio_backup_monitoring_restore_bucket,
+      minio_backup_monitoring_restore_request_id and source MinIO connection
+      settings.
+
+- name: Remove previous MinIO backup restore Job if it exists
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ minio_backup_monitoring_restore_job_name }}-{{ minio_backup_monitoring_restore_request_id }}"
+        namespace: "{{ minio_backup_monitoring_namespace }}"
+
+- name: Start MinIO backup restore Job
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'restore-job.yml.j2') | from_yaml }}"
+
+- name: Wait until MinIO backup restore Job finishes
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    name: "{{ minio_backup_monitoring_restore_job_name }}-{{ minio_backup_monitoring_restore_request_id }}"
+    namespace: "{{ minio_backup_monitoring_namespace }}"
+  register: minio_backup_monitoring_restore_job_info  # noqa var-naming[no-role-prefix]
+  until:
+    - minio_backup_monitoring_restore_job_info.resources | length > 0
+    - >-
+      (
+        minio_backup_monitoring_restore_job_info.resources[0].status.succeeded | default(0) | int
+      ) >= 1
+      or
+      (
+        minio_backup_monitoring_restore_job_info.resources[0].status.failed | default(0) | int
+      ) >= 1
+  retries: "{{ minio_backup_monitoring_restore_wait_retries }}"
+  delay: "{{ minio_backup_monitoring_restore_wait_delay }}"
+
+- name: Fail if MinIO backup restore Job failed
+  ansible.builtin.assert:
+    that:
+      - (minio_backup_monitoring_restore_job_info.resources[0].status.succeeded | default(0) | int) >= 1
+    fail_msg: >-
+      MinIO backup restore job
+      {{ minio_backup_monitoring_restore_job_name }}-{{ minio_backup_monitoring_restore_request_id }}
+      failed. Check pod logs in namespace {{ minio_backup_monitoring_namespace }}.

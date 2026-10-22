@@ -1,0 +1,144 @@
+#!/bin/sh
+set -eu
+
+BACKUP_ROOT="${BACKUP_ROOT:-{{ minio_backup_monitoring_backup_root }}}"
+LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ minio_backup_monitoring_lock_dir_name }}}"
+LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
+SOURCE_ALIAS="${SOURCE_ALIAS:-{{ minio_backup_monitoring_source_alias }}}"
+RESTORE_BUCKET="${RESTORE_BUCKET:-}"
+RESTORE_BACKUP_NAME="${RESTORE_BACKUP_NAME:-}"
+
+log_info() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+format_size() {
+  size_bytes="$1"
+
+  if [ "${size_bytes}" -ge 1073741824 ]; then
+    printf '%s GiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1073741824 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1048576 ]; then
+    printf '%s MiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1048576 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1024 ]; then
+    printf '%s KiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1024 }")"
+    return 0
+  fi
+
+  printf '%s B' "${size_bytes}"
+}
+
+format_duration() {
+  duration_seconds="$1"
+  hours=$((duration_seconds / 3600))
+  minutes=$(((duration_seconds % 3600) / 60))
+  seconds=$((duration_seconds % 60))
+
+  if [ "${hours}" -gt 0 ]; then
+    printf '%dh %02dm %02ds' "${hours}" "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  if [ "${minutes}" -gt 0 ]; then
+    printf '%dm %02ds' "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  printf '%ds' "${seconds}"
+}
+
+cleanup() {
+  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+if [ -z "${RESTORE_BUCKET}" ]; then
+  printf 'RESTORE_BUCKET is required\n' >&2
+  exit 1
+fi
+
+if [ -n "${JOB_PACKAGES:-}" ]; then
+  apk add --no-cache ${JOB_PACKAGES} >/dev/null
+fi
+
+command -v mc >/dev/null 2>&1 || {
+  printf 'mc client is not available in the job image\n' >&2
+  exit 1
+}
+
+if [ -d "${LOCK_DIR}" ]; then
+  printf 'backup lock is currently held by another job\n' >&2
+  exit 1
+fi
+
+if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+  printf 'failed to acquire backup lock\n' >&2
+  exit 1
+fi
+
+trap cleanup EXIT INT TERM
+
+if [ -n "${RESTORE_BACKUP_NAME}" ]; then
+  BACKUP_PATH="${BACKUP_ROOT}/${RESTORE_BACKUP_NAME}"
+else
+  BACKUP_PATH="$(ls -1dt "${BACKUP_ROOT}"/backup-* 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "${BACKUP_PATH}" ]; then
+  printf 'no backup directory found in %s\n' "${BACKUP_ROOT}" >&2
+  exit 1
+fi
+
+BACKUP_NAME="$(basename "${BACKUP_PATH}")"
+
+if [ ! -d "${BACKUP_PATH}" ]; then
+  printf 'backup path %s is not a directory\n' "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+BUCKETS_TSV_PATH="${BACKUP_PATH}/buckets.tsv"
+
+if [ ! -f "${BUCKETS_TSV_PATH}" ]; then
+  printf 'backup directory %s does not contain buckets.tsv\n' "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+BUCKET_FOUND=0
+while IFS='|' read -r bucket_name object_count total_bytes; do
+  [ -n "${bucket_name}" ] || continue
+  if [ "${bucket_name}" = "${RESTORE_BUCKET}" ]; then
+    BUCKET_FOUND=1
+    break
+  fi
+done < "${BUCKETS_TSV_PATH}"
+
+if [ "${BUCKET_FOUND}" -ne 1 ]; then
+  printf 'bucket %s was not found in backup %s\n' "${RESTORE_BUCKET}" "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+BUCKET_DIR="${BACKUP_PATH}/${RESTORE_BUCKET}"
+
+if [ ! -d "${BUCKET_DIR}" ]; then
+  printf 'bucket directory %s is missing in backup %s\n' "${RESTORE_BUCKET}" "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+mc alias set "${SOURCE_ALIAS}" \
+  "${SOURCE_MINIO_ENDPOINT}" \
+  "${SOURCE_MINIO_ACCESS_KEY}" \
+  "${SOURCE_MINIO_SECRET_KEY}" >/dev/null
+
+restore_started_at="$(date +%s)"
+log_info "restoring bucket ${RESTORE_BUCKET} from ${BACKUP_NAME} (existing objects are overwritten, extra destination objects are kept)"
+
+mc mirror --overwrite "${BUCKET_DIR}" "${SOURCE_ALIAS}/${RESTORE_BUCKET}/"
+
+restore_finished_at="$(date +%s)"
+restore_duration="$((restore_finished_at - restore_started_at))"
+restored_size_bytes="$(du -sb "${BUCKET_DIR}" | cut -f1)"
+log_info "bucket ${RESTORE_BUCKET} successfully restored from ${BACKUP_NAME}: duration=$(format_duration "${restore_duration}"), size=$(format_size "${restored_size_bytes}")"

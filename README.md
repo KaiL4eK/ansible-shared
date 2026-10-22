@@ -64,7 +64,15 @@ Before working with this repository, install Ansible dependencies:
   chart with pinned chart and image versions; per-consumer Vault auth and sync
   resources remain owned by the consumer/infrastructure playbook.
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
-  monitoring for PostgreSQL.
+  monitoring for PostgreSQL: scheduled `pg_dump` backups to a dedicated PVC,
+  restore verification against an ephemeral (non-persistent) verification
+  database, Microsoft Teams failure notifications and an on-demand restore Job
+  driven by consumer playbooks.
+- `roles/k8s/minio-backup-monitoring/` provides shared Kubernetes backup
+  monitoring for MinIO: scheduled `mc mirror` bucket backups with bucket/IAM
+  metadata export to a dedicated PVC, lightweight consistency verification of
+  stored objects and metadata archives, Microsoft Teams failure notifications
+  and an on-demand per-bucket restore Job driven by consumer playbooks.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
   service.
 - `roles/hermes/agent_env/` manages explicit Hermes environment values in the

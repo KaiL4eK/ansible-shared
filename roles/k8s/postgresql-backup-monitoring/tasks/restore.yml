@@ -1,0 +1,57 @@
+---
+- name: Assert PostgreSQL backup restore variables are set
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_restore_target_db_name | length > 0
+      - backup_monitoring_restore_request_id | length > 0
+      - backup_monitoring_source_db_host | length > 0
+      - backup_monitoring_source_db_user | length > 0
+      - backup_monitoring_source_db_password | length > 0
+      - backup_monitoring_source_db_name | length > 0
+    fail_msg: >-
+      PostgreSQL backup restore requires backup_monitoring_restore_target_db_name,
+      backup_monitoring_restore_request_id and source PostgreSQL connection
+      settings.
+
+- name: Remove previous PostgreSQL backup restore Job if it exists
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ backup_monitoring_restore_job_name }}-{{ backup_monitoring_restore_request_id }}"
+        namespace: "{{ backup_monitoring_namespace }}"
+
+- name: Start PostgreSQL backup restore Job
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'restore-job.yml.j2') | from_yaml }}"
+
+- name: Wait until PostgreSQL backup restore Job finishes
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    name: "{{ backup_monitoring_restore_job_name }}-{{ backup_monitoring_restore_request_id }}"
+    namespace: "{{ backup_monitoring_namespace }}"
+  register: backup_monitoring_restore_job_info  # noqa var-naming[no-role-prefix]
+  until:
+    - backup_monitoring_restore_job_info.resources | length > 0
+    - >-
+      (
+        backup_monitoring_restore_job_info.resources[0].status.succeeded | default(0) | int
+      ) >= 1
+      or
+      (
+        backup_monitoring_restore_job_info.resources[0].status.failed | default(0) | int
+      ) >= 1
+  retries: "{{ backup_monitoring_restore_wait_retries }}"
+  delay: "{{ backup_monitoring_restore_wait_delay }}"
+
+- name: Fail if PostgreSQL backup restore Job failed
+  ansible.builtin.assert:
+    that:
+      - (backup_monitoring_restore_job_info.resources[0].status.succeeded | default(0) | int) >= 1
+    fail_msg: >-
+      PostgreSQL backup restore job {{ backup_monitoring_restore_job_name }}-{{ backup_monitoring_restore_request_id }}
+      failed. Check pod logs in namespace {{ backup_monitoring_namespace }}.

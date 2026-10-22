@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ minio_backup_monitoring_restore_job_name }}-{{ minio_backup_monitoring_restore_request_id }}
+  namespace: {{ minio_backup_monitoring_namespace }}
+spec:
+  ttlSecondsAfterFinished: {{ minio_backup_monitoring_job_ttl_seconds }}
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ minio_backup_monitoring_service_account_name }}
+      containers:
+        - name: restore
+          image: {{ minio_backup_monitoring_job_image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - /scripts/restore.sh
+          env:
+            - name: RESTORE_BUCKET
+              value: {{ minio_backup_monitoring_restore_bucket | quote }}
+            - name: RESTORE_BACKUP_NAME
+              value: {{ minio_backup_monitoring_restore_backup_name | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ minio_backup_monitoring_backup_secret_name }}
+          volumeMounts:
+            - name: backups
+              mountPath: {{ minio_backup_monitoring_backup_root }}
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ minio_backup_monitoring_backup_pvc_name }}
+        - name: scripts
+          configMap:
+            name: {{ minio_backup_monitoring_restore_scripts_configmap_name }}
+            defaultMode: 0755

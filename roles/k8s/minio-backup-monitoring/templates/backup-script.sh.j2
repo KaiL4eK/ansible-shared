@@ -1,0 +1,192 @@
+#!/bin/sh
+set -eu
+
+BACKUP_ROOT="${BACKUP_ROOT:-{{ minio_backup_monitoring_backup_root }}}"
+LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ minio_backup_monitoring_lock_dir_name }}}"
+LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
+BACKUP_RETENTION_COUNT="${BACKUP_RETENTION_COUNT:-{{ minio_backup_monitoring_backup_retention_count }}}"
+SOURCE_ALIAS="${SOURCE_ALIAS:-{{ minio_backup_monitoring_source_alias }}}"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+STAGING_DIR="${BACKUP_ROOT}/.staging-backup-${TIMESTAMP}"
+FINAL_BACKUP_DIR="${BACKUP_ROOT}/backup-${TIMESTAMP}"
+METADATA_DIR="${STAGING_DIR}/metadata"
+LISTINGS_DIR="${STAGING_DIR}/listings"
+BUCKETS_PATH="${STAGING_DIR}/.buckets.txt"
+BUCKETS_TSV_PATH="${STAGING_DIR}/buckets.tsv"
+BACKUP_META_PATH="${STAGING_DIR}/backup-meta.txt"
+MIRRORED_BUCKET_COUNT=0
+
+log_info() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+format_duration() {
+  duration_seconds="$1"
+  hours=$((duration_seconds / 3600))
+  minutes=$(((duration_seconds % 3600) / 60))
+  seconds=$((duration_seconds % 60))
+
+  if [ "${hours}" -gt 0 ]; then
+    printf '%dh %02dm %02ds' "${hours}" "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  if [ "${minutes}" -gt 0 ]; then
+    printf '%dm %02ds' "${minutes}" "${seconds}"
+    return 0
+  fi
+
+  printf '%ds' "${seconds}"
+}
+
+format_size() {
+  size_bytes="$1"
+
+  if [ "${size_bytes}" -ge 1073741824 ]; then
+    printf '%s GiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1073741824 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1048576 ]; then
+    printf '%s MiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1048576 }")"
+    return 0
+  fi
+
+  if [ "${size_bytes}" -ge 1024 ]; then
+    printf '%s KiB' "$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1024 }")"
+    return 0
+  fi
+
+  printf '%s B' "${size_bytes}"
+}
+
+cleanup() {
+  if [ -n "${STAGING_DIR}" ] && [ -d "${STAGING_DIR}" ]; then
+    rm -rf "${STAGING_DIR}" >/dev/null 2>&1 || true
+  fi
+  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+prune_old_backups() {
+  backup_index=0
+
+  for backup_dir in $(ls -1dt "${BACKUP_ROOT}"/backup-* 2>/dev/null); do
+    [ -d "${backup_dir}" ] || continue
+    backup_index=$((backup_index + 1))
+
+    if [ "${backup_index}" -le "${BACKUP_RETENTION_COUNT}" ]; then
+      continue
+    fi
+
+    rm -rf "${backup_dir}" >/dev/null 2>&1 || true
+  done
+}
+
+if [ -n "${JOB_PACKAGES:-}" ]; then
+  apk add --no-cache ${JOB_PACKAGES} >/dev/null
+fi
+
+command -v mc >/dev/null 2>&1 || {
+  printf 'mc client is not available in the job image\n' >&2
+  exit 1
+}
+
+if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+  printf 'backup lock is already held in %s\n' "${LOCK_DIR}" >&2
+  exit 1
+fi
+
+trap cleanup EXIT INT TERM
+
+mc alias set "${SOURCE_ALIAS}" \
+  "${SOURCE_MINIO_ENDPOINT}" \
+  "${SOURCE_MINIO_ACCESS_KEY}" \
+  "${SOURCE_MINIO_SECRET_KEY}" >/dev/null
+
+mkdir -p "${METADATA_DIR}" "${LISTINGS_DIR}"
+
+mc ls "${SOURCE_ALIAS}/" | awk '$NF ~ /\/$/ { print substr($NF, 1, length($NF) - 1) }' > "${BUCKETS_PATH}"
+
+bucket_count="$(wc -l < "${BUCKETS_PATH}" | tr -d '[:space:]')"
+if [ "${bucket_count}" -eq 0 ]; then
+  printf 'no buckets found on source MinIO instance\n' >&2
+  exit 1
+fi
+
+: > "${BUCKETS_TSV_PATH}"
+while IFS= read -r bucket_name; do
+  [ -n "${bucket_name}" ] || continue
+  bucket_dir="${STAGING_DIR}/${bucket_name}"
+  mirror_started_at="$(date +%s)"
+
+  log_info "starting mirror for bucket ${bucket_name}"
+
+  mc mirror --overwrite "${SOURCE_ALIAS}/${bucket_name}" "${bucket_dir}/"
+
+  object_count="$(find "${bucket_dir}" -type f | wc -l | tr -d '[:space:]')"
+  total_bytes="$(du -sb "${bucket_dir}" | cut -f1)"
+
+  (cd "${bucket_dir}" && find . -type f | sort) > "${LISTINGS_DIR}/${bucket_name}.listing.txt"
+
+  printf '%s|%s|%s\n' "${bucket_name}" "${object_count}" "${total_bytes}" >> "${BUCKETS_TSV_PATH}"
+
+  MIRRORED_BUCKET_COUNT=$((MIRRORED_BUCKET_COUNT + 1))
+  mirror_finished_at="$(date +%s)"
+  mirror_duration="$((mirror_finished_at - mirror_started_at))"
+  log_info "finished mirror for bucket ${bucket_name}: duration=$(format_duration "${mirror_duration}"), objects=${object_count}, size=$(format_size "${total_bytes}")"
+done < "${BUCKETS_PATH}"
+
+if [ ! -s "${BUCKETS_TSV_PATH}" ]; then
+  printf 'no buckets were mirrored\n' >&2
+  exit 1
+fi
+
+log_info "exporting bucket metadata"
+bucket_export_dir="${METADATA_DIR}/.bucket-export"
+mkdir -p "${bucket_export_dir}"
+(
+  cd "${bucket_export_dir}" &&
+    mc admin cluster bucket export "${SOURCE_ALIAS}"
+)
+
+bucket_metadata_zip="$(ls -1 "${bucket_export_dir}"/*.zip 2>/dev/null | head -n 1 || true)"
+if [ -z "${bucket_metadata_zip}" ]; then
+  printf 'bucket metadata export did not produce an archive\n' >&2
+  exit 1
+fi
+mv "${bucket_metadata_zip}" "${METADATA_DIR}/bucket-metadata.zip"
+rm -rf "${bucket_export_dir}"
+
+log_info "exporting IAM metadata"
+mc admin cluster iam export "${SOURCE_ALIAS}" --output "${METADATA_DIR}/iam-metadata.zip"
+
+log_info "exporting cluster configuration"
+mc admin config export "${SOURCE_ALIAS}" > "${METADATA_DIR}/cluster-config.txt"
+
+for metadata_zip in "${METADATA_DIR}"/*.zip; do
+  if ! unzip -t "${metadata_zip}" >/dev/null 2>&1; then
+    printf 'metadata archive %s is corrupt\n' "$(basename "${metadata_zip}")" >&2
+    exit 1
+  fi
+done
+
+if [ ! -s "${METADATA_DIR}/cluster-config.txt" ]; then
+  printf 'cluster configuration export is empty\n' >&2
+  exit 1
+fi
+
+mc --version | head -n 1 > "${BACKUP_META_PATH}"
+printf 'backup_completed_at=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "${BACKUP_META_PATH}"
+printf 'source_endpoint=%s\n' "${SOURCE_MINIO_ENDPOINT}" >> "${BACKUP_META_PATH}"
+printf 'source_alias=%s\n' "${SOURCE_ALIAS}" >> "${BACKUP_META_PATH}"
+printf 'mirrored_buckets=%s\n' "${MIRRORED_BUCKET_COUNT}" >> "${BACKUP_META_PATH}"
+
+rm -f "${BUCKETS_PATH}"
+mv "${STAGING_DIR}" "${FINAL_BACKUP_DIR}"
+STAGING_DIR=""
+
+log_info "backup stored in ${FINAL_BACKUP_DIR}"
+backup_total_size_bytes="$(du -sb "${FINAL_BACKUP_DIR}" | cut -f1)"
+log_info "backup summary: buckets=${MIRRORED_BUCKET_COUNT}, total_size=$(format_size "${backup_total_size_bytes}")"
+
+prune_old_backups

@@ -1,0 +1,127 @@
+#!/bin/sh
+set -eu
+
+BACKUP_ROOT="${BACKUP_ROOT:-{{ backup_monitoring_backup_root }}}"
+LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ backup_monitoring_lock_dir_name }}}"
+LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
+RESTORE_DB_NAME="${RESTORE_DB_NAME:-}"
+RESTORE_BACKUP_NAME="${RESTORE_BACKUP_NAME:-}"
+
+log_info() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+run_psql() {
+  PGPASSWORD="${SOURCE_DB_PASSWORD}" psql \
+    -v ON_ERROR_STOP=1 \
+    -h "${SOURCE_DB_HOST}" \
+    -p "${SOURCE_DB_PORT}" \
+    -U "${SOURCE_DB_USER}" \
+    -d "${SOURCE_DB_NAME}" \
+    "$@"
+}
+
+cleanup() {
+  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+if [ -z "${RESTORE_DB_NAME}" ]; then
+  printf 'RESTORE_DB_NAME is required\n' >&2
+  exit 1
+fi
+
+if [ -d "${LOCK_DIR}" ]; then
+  printf 'backup lock is currently held by another job\n' >&2
+  exit 1
+fi
+
+if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+  printf 'failed to acquire backup lock\n' >&2
+  exit 1
+fi
+
+trap cleanup EXIT INT TERM
+
+if [ -n "${RESTORE_BACKUP_NAME}" ]; then
+  BACKUP_PATH="${BACKUP_ROOT}/${RESTORE_BACKUP_NAME}"
+else
+  BACKUP_PATH="$(ls -1dt "${BACKUP_ROOT}"/backup-* 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "${BACKUP_PATH}" ]; then
+  printf 'no backup directory found in %s\n' "${BACKUP_ROOT}" >&2
+  exit 1
+fi
+
+BACKUP_NAME="$(basename "${BACKUP_PATH}")"
+DB_OWNERS_PATH="${BACKUP_PATH}/db-owners.tsv"
+ROLES_SQL_PATH="${BACKUP_PATH}/roles.sql"
+
+if [ ! -d "${BACKUP_PATH}" ]; then
+  printf 'backup path %s is not a directory\n' "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+if [ ! -f "${DB_OWNERS_PATH}" ]; then
+  printf 'backup directory %s does not contain db-owners.tsv\n' "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+if [ ! -f "${ROLES_SQL_PATH}" ]; then
+  printf 'backup directory %s does not contain roles.sql\n' "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+DB_OWNER=''
+DUMP_FILE=''
+while IFS='|' read -r source_db_name db_owner dump_file; do
+  [ -n "${source_db_name}" ] || continue
+  if [ "${source_db_name}" = "${RESTORE_DB_NAME}" ]; then
+    DB_OWNER="${db_owner}"
+    DUMP_FILE="${dump_file}"
+    break
+  fi
+done < "${DB_OWNERS_PATH}"
+
+if [ -z "${DB_OWNER}" ] || [ -z "${DUMP_FILE}" ]; then
+  printf 'database %s was not found in backup %s\n' "${RESTORE_DB_NAME}" "${BACKUP_NAME}" >&2
+  exit 1
+fi
+
+DUMP_PATH="${BACKUP_PATH}/${DUMP_FILE}"
+
+if [ ! -f "${DUMP_PATH}" ]; then
+  printf 'dump file %s for database %s is missing\n' "${DUMP_FILE}" "${RESTORE_DB_NAME}" >&2
+  exit 1
+fi
+
+if [ -s "${ROLES_SQL_PATH}" ]; then
+  log_info "restoring roles from ${BACKUP_NAME}"
+  run_psql -f "${ROLES_SQL_PATH}" >/dev/null
+fi
+
+log_info "dropping and recreating database ${RESTORE_DB_NAME} with owner ${DB_OWNER}"
+run_psql \
+  -v db_name="${RESTORE_DB_NAME}" \
+  -v db_owner="${DB_OWNER}" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'db_name' AND pid <> pg_backend_pid();
+SELECT format('DROP DATABASE IF EXISTS %I', :'db_name') \gexec
+SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_owner') \gexec
+SQL
+
+log_info "restoring database ${RESTORE_DB_NAME} from ${DUMP_FILE}"
+PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
+  -h "${SOURCE_DB_HOST}" \
+  -p "${SOURCE_DB_PORT}" \
+  -U "${SOURCE_DB_USER}" \
+  -d "${RESTORE_DB_NAME}" \
+  --clean \
+  --if-exists \
+  --role="${DB_OWNER}" \
+  --no-owner \
+  --no-privileges \
+  "${DUMP_PATH}"
+
+log_info "database ${RESTORE_DB_NAME} successfully restored from ${BACKUP_NAME}"

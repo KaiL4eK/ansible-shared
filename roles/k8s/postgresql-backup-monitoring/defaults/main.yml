@@ -11,7 +11,6 @@ backup_monitoring_db_image_repository: bitnamilegacy/postgresql  # noqa var-nami
 backup_monitoring_db_image_tag: 17.6.0-debian-12-r4  # noqa var-naming[no-role-prefix]
 backup_monitoring_storage_class: nfs  # noqa var-naming[no-role-prefix]
 backup_monitoring_backup_storage_size: 50Gi  # noqa var-naming[no-role-prefix]
-backup_monitoring_db_storage_size: 8Gi  # noqa var-naming[no-role-prefix]
 
 backup_monitoring_backup_root: /backups  # noqa var-naming[no-role-prefix]
 backup_monitoring_lock_dir_name: .backup-check.lock  # noqa var-naming[no-role-prefix]
@@ -43,7 +42,6 @@ backup_monitoring_source_db_name: postgres  # noqa var-naming[no-role-prefix]
 backup_monitoring_ignored_databases: []  # noqa var-naming[no-role-prefix]
 backup_monitoring_ignored_table_data: {}  # noqa var-naming[no-role-prefix]
 
-backup_monitoring_mattermost_webhook_url: ""  # noqa var-naming[no-role-prefix]
 backup_monitoring_teams_webhook_url: ""  # noqa var-naming[no-role-prefix]
 
 backup_monitoring_backup_concurrency_policy: Forbid  # noqa var-naming[no-role-prefix]
@@ -52,3 +50,12 @@ backup_monitoring_starting_deadline_seconds: 1800  # noqa var-naming[no-role-pre
 backup_monitoring_successful_jobs_history_limit: 2  # noqa var-naming[no-role-prefix]
 backup_monitoring_failed_jobs_history_limit: 5  # noqa var-naming[no-role-prefix]
 backup_monitoring_job_ttl_seconds: 86400  # noqa var-naming[no-role-prefix]
+
+backup_monitoring_restore_job_name: postgresql-backup-monitoring-restore  # noqa var-naming[no-role-prefix]
+backup_monitoring_restore_scripts_configmap_name: >-  # noqa var-naming[no-role-prefix]
+  postgresql-backup-monitoring-restore-scripts
+backup_monitoring_restore_target_db_name: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_restore_backup_name: ""  # noqa var-naming[no-role-prefix]
+backup_monitoring_restore_request_id: manual  # noqa var-naming[no-role-prefix]
+backup_monitoring_restore_wait_retries: 180  # noqa var-naming[no-role-prefix]
+backup_monitoring_restore_wait_delay: 10  # noqa var-naming[no-role-prefix]

@@ -1,0 +1,44 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minio-backup-monitoring-backup
+  namespace: {{ minio_backup_monitoring_namespace }}
+spec:
+  schedule: "{{ minio_backup_monitoring_backup_schedule }}"
+  timeZone: {{ minio_backup_monitoring_timezone }}
+  concurrencyPolicy: {{ minio_backup_monitoring_backup_concurrency_policy }}
+  startingDeadlineSeconds: {{ minio_backup_monitoring_starting_deadline_seconds }}
+  successfulJobsHistoryLimit: {{ minio_backup_monitoring_successful_jobs_history_limit }}
+  failedJobsHistoryLimit: {{ minio_backup_monitoring_failed_jobs_history_limit }}
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: {{ minio_backup_monitoring_job_ttl_seconds }}
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ minio_backup_monitoring_service_account_name }}
+          containers:
+            - name: backup
+              image: {{ minio_backup_monitoring_job_image }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - /scripts/backup.sh
+              envFrom:
+                - secretRef:
+                    name: {{ minio_backup_monitoring_backup_secret_name }}
+              volumeMounts:
+                - name: backups
+                  mountPath: {{ minio_backup_monitoring_backup_root }}
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ minio_backup_monitoring_backup_pvc_name }}
+            - name: scripts
+              configMap:
+                name: {{ minio_backup_monitoring_backup_scripts_configmap_name }}
+                defaultMode: 0755

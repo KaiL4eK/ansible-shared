@@ -94,9 +94,7 @@
         postgresPassword: "{{ backup_monitoring_db_admin_password }}"
       primary:
         persistence:
-          enabled: true
-          size: "{{ backup_monitoring_db_storage_size }}"
-          storageClass: "{{ backup_monitoring_storage_class }}"
+          enabled: false
 
 - name: Ensure PostgreSQL backup monitoring backup runtime Secret exists
   kubernetes.core.k8s:
@@ -135,7 +133,6 @@
         CHECK_DB_USER: "{{ backup_monitoring_db_admin_user }}"
         CHECK_DB_PASSWORD: "{{ backup_monitoring_db_admin_password }}"
         CHECK_DB_NAME: "{{ backup_monitoring_check_db_name }}"
-        MATTERMOST_WEBHOOK_URL: "{{ backup_monitoring_mattermost_webhook_url }}"
         TEAMS_WEBHOOK_URL: "{{ backup_monitoring_teams_webhook_url }}"
 
 - name: Ensure PostgreSQL backup monitoring backup script ConfigMap exists
