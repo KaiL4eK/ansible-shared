@@ -7,6 +7,7 @@ LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ backup_monitoring_lock_max_age_
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 RESTORE_DB_NAME="${RESTORE_DB_NAME:-}"
 RESTORE_BACKUP_NAME="${RESTORE_BACKUP_NAME:-}"
+RESTORE_WORK_DIR="/tmp/restore-$$"
 
 log_info() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -20,6 +21,38 @@ run_psql() {
     -U "${SOURCE_DB_USER}" \
     -d "${SOURCE_DB_NAME}" \
     "$@"
+}
+
+run_psql_on_db() {
+  target_db="$1"
+  shift
+
+  PGPASSWORD="${SOURCE_DB_PASSWORD}" psql \
+    -v ON_ERROR_STOP=1 \
+    -h "${SOURCE_DB_HOST}" \
+    -p "${SOURCE_DB_PORT}" \
+    -U "${SOURCE_DB_USER}" \
+    -d "${target_db}" \
+    "$@"
+}
+
+# Расширения из дампа восстанавливаются не через pg_restore: не-trusted
+# расширения (например pg_stat_statements) может создавать только
+# суперпользователь, а restore идёт с SET ROLE владельца базы. TOC-записи
+# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь.
+precreate_extensions() {
+  target_db="$1"
+  ext_list_path="$2"
+
+  [ -s "${ext_list_path}" ] || return 0
+
+  while IFS= read -r ext_name; do
+    [ -n "${ext_name}" ] || continue
+    log_info "creating extension ${ext_name} in ${target_db} as superuser"
+    run_psql_on_db "${target_db}" -v ext_name="${ext_name}" <<'SQL'
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I', :'ext_name') \gexec
+SQL
+  done < "${ext_list_path}"
 }
 
 # Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
@@ -57,6 +90,7 @@ release_lock() {
 }
 
 cleanup() {
+  rm -rf "${RESTORE_WORK_DIR}" >/dev/null 2>&1 || true
   release_lock
 }
 
@@ -71,6 +105,8 @@ if ! acquire_lock "restore-${RESTORE_DB_NAME}"; then
 fi
 
 trap cleanup EXIT INT TERM
+
+mkdir -p "${RESTORE_WORK_DIR}"
 
 if [ -n "${RESTORE_BACKUP_NAME}" ]; then
   BACKUP_PATH="${BACKUP_ROOT}/${RESTORE_BACKUP_NAME}"
@@ -141,6 +177,32 @@ SELECT format('DROP DATABASE IF EXISTS %I', :'db_name') \gexec
 SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_owner') \gexec
 SQL
 
+toc_path="${RESTORE_WORK_DIR}/toc.txt"
+toc_filtered_path="${RESTORE_WORK_DIR}/toc.filtered.txt"
+ext_list_path="${RESTORE_WORK_DIR}/extensions.txt"
+
+if ! pg_restore --list "${DUMP_PATH}" > "${toc_path}" 2>/dev/null; then
+  printf 'unable to read archive TOC from %s\n' "${DUMP_PATH}" >&2
+  exit 1
+fi
+
+# Вырезаем EXTENSION/COMMENT-записи: их создаёт precreate_extensions
+# суперпользователем; через SET ROLE владельца они бы падали (не-trusted
+# расширения) и роняли pg_restore
+sed -E \
+  -e '/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - /d' \
+  -e '/^[0-9]+; [0-9]+ [0-9]+ COMMENT - EXTENSION /d' \
+  "${toc_path}" > "${toc_filtered_path}"
+sed -n -E 's/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - ([A-Za-z0-9_.-]+).*/\1/p' "${toc_path}" > "${ext_list_path}"
+
+if [ -s "${ext_list_path}" ]; then
+  log_info "pre-creating extensions for ${RESTORE_DB_NAME}: $(tr '\n' ' ' < "${ext_list_path}")"
+  if ! precreate_extensions "${RESTORE_DB_NAME}" "${ext_list_path}"; then
+    printf 'unable to pre-create extensions for database %s\n' "${RESTORE_DB_NAME}" >&2
+    exit 1
+  fi
+fi
+
 log_info "restoring database ${RESTORE_DB_NAME} from ${DUMP_FILE}"
 PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
   -h "${SOURCE_DB_HOST}" \
@@ -152,6 +214,7 @@ PGPASSWORD="${SOURCE_DB_PASSWORD}" pg_restore \
   --role="${DB_OWNER}" \
   --no-owner \
   --no-privileges \
+  --use-list="${toc_filtered_path}" \
   "${DUMP_PATH}"
 
 log_info "database ${RESTORE_DB_NAME} successfully restored from ${BACKUP_NAME}"

@@ -46,6 +46,19 @@ run_psql() {
     "$@"
 }
 
+run_psql_on_db() {
+  target_db="$1"
+  shift
+
+  PGPASSWORD="${CHECK_DB_PASSWORD}" psql \
+    -v ON_ERROR_STOP=1 \
+    -h "${CHECK_DB_HOST}" \
+    -p "${CHECK_DB_PORT}" \
+    -U "${CHECK_DB_USER}" \
+    -d "${target_db}" \
+    "$@"
+}
+
 ensure_results_table() {
   attempt=1
   max_attempts=30
@@ -120,6 +133,28 @@ SELECT pg_get_userbyid(datdba)
 FROM pg_database
 WHERE datname = :'db_name';
 SQL
+}
+
+# Расширения из дампа восстанавливаются не через pg_restore: не-trusted
+# расширения (например pg_stat_statements) может создавать только
+# суперпользователь, а restore идёт с SET ROLE владельца базы. TOC-записи
+# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь.
+precreate_extensions() {
+  restore_db_name="$1"
+  ext_list_path="$2"
+
+  [ -s "${ext_list_path}" ] || return 0
+
+  while IFS= read -r ext_name; do
+    [ -n "${ext_name}" ] || continue
+
+    if ! run_psql_on_db "${restore_db_name}" -v ext_name="${ext_name}" <<'SQL' >/dev/null 2>&1
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I', :'ext_name') \gexec
+SQL
+    then
+      return 1
+    fi
+  done < "${ext_list_path}"
 }
 
 get_table_count() {
@@ -236,6 +271,13 @@ cleanup() {
 finish() {
   status="$1"
   details="$2"
+
+  # Причина провала обязана попадать в лог pod'а, а не только в
+  # verification-БД и Teams: без этого диагностика требует ручных запросов
+  if [ "${status}" != "ok" ] && [ "${status}" != "skipped_locked" ]; then
+    printf '[%s] check failed: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${details}" >&2
+  fi
+
   log_result "${status}" "${details}" "${LATEST_BACKUP}" "${LATEST_MTIME}"
   notify_failure "${status}" "${details}" "${LATEST_BACKUP}"
   cleanup
@@ -252,6 +294,8 @@ if ! acquire_lock "check-$(date '+%Y%m%d-%H%M%S')"; then
 fi
 
 ACQUIRED_LOCK=1
+
+mkdir -p "${WORK_DIR}"
 
 ensure_results_table
 
@@ -315,6 +359,32 @@ while IFS='|' read -r source_db_name db_owner dump_file; do
     finish "failed" "unable to create restore database for ${source_db_name} owned by ${db_owner}"
   fi
 
+  toc_path="${WORK_DIR}/${CURRENT_RESTORE_DB}.toc"
+  toc_filtered_path="${WORK_DIR}/${CURRENT_RESTORE_DB}.filtered.toc"
+  ext_list_path="${WORK_DIR}/${CURRENT_RESTORE_DB}.extensions"
+
+  if ! pg_restore --list "${dump_path}" > "${toc_path}" 2>/dev/null; then
+    finish "failed" "unable to read archive TOC for ${source_db_name} from ${dump_file}"
+  fi
+
+  # Вырезаем EXTENSION/COMMENT-записи: их создаёт precreate_extensions
+  # суперпользователем; через SET ROLE владельца они бы падали (не-trusted
+  # расширения) и роняли pg_restore
+  sed -E \
+    -e '/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - /d' \
+    -e '/^[0-9]+; [0-9]+ [0-9]+ COMMENT - EXTENSION /d' \
+    "${toc_path}" > "${toc_filtered_path}"
+  sed -n -E 's/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - ([A-Za-z0-9_.-]+).*/\1/p' "${toc_path}" > "${ext_list_path}"
+
+  if [ -s "${ext_list_path}" ]; then
+    log_info "pre-creating extensions for ${source_db_name}: $(tr '\n' ' ' < "${ext_list_path}")"
+    if ! precreate_extensions "${CURRENT_RESTORE_DB}" "${ext_list_path}"; then
+      finish "failed" "unable to pre-create extensions $(tr '\n' ' ' < "${ext_list_path}")for database ${source_db_name}: extension is not available in verification database or creation failed"
+    fi
+  fi
+
+  pg_restore_stderr_path="${WORK_DIR}/${CURRENT_RESTORE_DB}.pg_restore.err"
+
   if ! PGPASSWORD="${CHECK_DB_PASSWORD}" pg_restore \
     -h "${CHECK_DB_HOST}" \
     -p "${CHECK_DB_PORT}" \
@@ -325,8 +395,9 @@ while IFS='|' read -r source_db_name db_owner dump_file; do
     --role="${db_owner}" \
     --no-owner \
     --no-privileges \
-    "${dump_path}" >/dev/null 2>&1; then
-    finish "failed" "restore failed for ${source_db_name} as ${db_owner}"
+    --use-list="${toc_filtered_path}" \
+    "${dump_path}" >/dev/null 2>"${pg_restore_stderr_path}"; then
+    finish "failed" "restore failed for ${source_db_name} as ${db_owner}: $(tail -n 3 "${pg_restore_stderr_path}" | tr '\n' ' ')"
   fi
 
   actual_owner="$(get_db_owner "${CURRENT_RESTORE_DB}")"
