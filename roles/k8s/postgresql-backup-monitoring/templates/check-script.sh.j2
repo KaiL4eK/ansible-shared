@@ -206,14 +206,15 @@ log_result() {
     -v backup_file="${backup_file}" \
     -v backup_mtime="${backup_mtime}" \
     -v details="${details}" <<'SQL' >/dev/null 2>&1 || true
+-- to_timestamp, а не CASE + cast: константный cast ('')::timestamptz из
+-- ELSE-ветки вычисляется const-folding'ом при парсинге и падает на пустом
+-- backup_mtime (статусы до обнаружения копии: skipped_locked и т.п.),
+-- из-за чего log_result молча терял запись
 INSERT INTO backup_verification_results (status, backup_file, backup_mtime, details)
 VALUES (
   :'status',
   NULLIF(:'backup_file', ''),
-  CASE
-    WHEN NULLIF(:'backup_mtime', '') IS NULL THEN NULL
-    ELSE (:'backup_mtime')::timestamptz
-  END,
+  to_timestamp(NULLIF(:'backup_mtime', ''), 'YYYY-MM-DD HH24:MI:SS'),
   :'details'
 );
 SQL
@@ -288,10 +289,13 @@ finish() {
   status="$1"
   details="$2"
 
-  # Причина провала обязана попадать в лог pod'а, а не только в
-  # verification-БД и Teams: без этого диагностика требует ручных запросов
+  # Причина обязана попадать в лог pod'а, а не только в verification-БД и
+  # Teams: без этого диагностика требует ручных запросов (а упавший INSERT
+  # в log_result вообще оставляет статус невидимым)
   if [ "${status}" != "ok" ] && [ "${status}" != "skipped_locked" ]; then
     printf '[%s] check failed: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${details}" >&2
+  elif [ "${status}" = "skipped_locked" ]; then
+    printf '[%s] check skipped: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${details}"
   fi
 
   log_result "${status}" "${details}" "${LATEST_BACKUP}" "${LATEST_MTIME}"
@@ -310,6 +314,11 @@ if ! acquire_lock "check-$(date '+%Y%m%d-%H%M%S')"; then
 fi
 
 ACQUIRED_LOCK=1
+
+# Аварийный выход мимо finish (set -e, сигнал) не должен бросать NFS-лок:
+# брошенный лок блокирует ручные прогоны до отработки steal-порога (5h).
+# Повторный вызов cleanup из finish идемпотентен.
+trap cleanup EXIT INT TERM
 
 mkdir -p "${WORK_DIR}"
 
