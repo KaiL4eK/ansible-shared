@@ -3,6 +3,7 @@ set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-{{ backup_monitoring_backup_root }}}"
 LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ backup_monitoring_lock_dir_name }}}"
+LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ backup_monitoring_lock_max_age_seconds }}}"
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 RESTORE_DB_NAME="${RESTORE_DB_NAME:-}"
 RESTORE_BACKUP_NAME="${RESTORE_BACKUP_NAME:-}"
@@ -21,8 +22,42 @@ run_psql() {
     "$@"
 }
 
-cleanup() {
+# Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
+# LOCK_MAX_AGE_SECONDS (activeDeadlineSeconds), брошенный лок забираем сами
+acquire_lock() {
+  lock_owner="$1"
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  lock_mtime="$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || printf '0')"
+  lock_age_seconds=$(( $(date +%s) - lock_mtime ))
+
+  if [ "${lock_age_seconds}" -lt "${LOCK_MAX_AGE_SECONDS}" ]; then
+    return 1
+  fi
+
+  printf 'stealing stale backup lock %s: age %ss exceeds %ss (previous owner likely killed)\n' \
+    "${LOCK_DIR}" "${lock_age_seconds}" "${LOCK_MAX_AGE_SECONDS}" >&2
+  rm -rf "${LOCK_DIR}" >/dev/null 2>&1 || true
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s (stolen)\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  return 1
+}
+
+release_lock() {
+  rm -f "${LOCK_DIR}/owner" >/dev/null 2>&1 || true
   rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+cleanup() {
+  release_lock
 }
 
 if [ -z "${RESTORE_DB_NAME}" ]; then
@@ -30,13 +65,8 @@ if [ -z "${RESTORE_DB_NAME}" ]; then
   exit 1
 fi
 
-if [ -d "${LOCK_DIR}" ]; then
+if ! acquire_lock "restore-${RESTORE_DB_NAME}"; then
   printf 'backup lock is currently held by another job\n' >&2
-  exit 1
-fi
-
-if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-  printf 'failed to acquire backup lock\n' >&2
   exit 1
 fi
 

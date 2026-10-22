@@ -3,6 +3,9 @@ set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-{{ minio_backup_monitoring_backup_root }}}"
 LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ minio_backup_monitoring_lock_dir_name }}}"
+LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ minio_backup_monitoring_lock_max_age_seconds }}}"
+FREE_SPACE_HEADROOM_PERCENT="${FREE_SPACE_HEADROOM_PERCENT:-{{ minio_backup_monitoring_free_space_headroom_percent }}}"
+FREE_SPACE_MIN_RESERVE_BYTES="${FREE_SPACE_MIN_RESERVE_BYTES:-{{ minio_backup_monitoring_free_space_min_reserve_bytes }}}"
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 BACKUP_RETENTION_COUNT="${BACKUP_RETENTION_COUNT:-{{ minio_backup_monitoring_backup_retention_count }}}"
 SOURCE_ALIAS="${SOURCE_ALIAS:-{{ minio_backup_monitoring_source_alias }}}"
@@ -11,6 +14,7 @@ STAGING_DIR="${BACKUP_ROOT}/.staging-backup-${TIMESTAMP}"
 FINAL_BACKUP_DIR="${BACKUP_ROOT}/backup-${TIMESTAMP}"
 METADATA_DIR="${STAGING_DIR}/metadata"
 LISTINGS_DIR="${STAGING_DIR}/listings"
+BUCKETS_JSON_PATH="${STAGING_DIR}/.buckets.json"
 BUCKETS_PATH="${STAGING_DIR}/.buckets.txt"
 BUCKETS_TSV_PATH="${STAGING_DIR}/buckets.tsv"
 BACKUP_META_PATH="${STAGING_DIR}/backup-meta.txt"
@@ -60,11 +64,84 @@ format_size() {
   printf '%s B' "${size_bytes}"
 }
 
+# Лок живёт на NFS и переживает под: если владелец убит (activeDeadlineSeconds
+# гарантирует смерть раньше LOCK_MAX_AGE_SECONDS), лок считается брошенным и
+# захватывается следующим джобом с warning. owner-файл фиксирует, кто держит лок
+acquire_lock() {
+  lock_owner="$1"
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  lock_mtime="$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || printf '0')"
+  lock_age_seconds=$(( $(date +%s) - lock_mtime ))
+
+  if [ "${lock_age_seconds}" -lt "${LOCK_MAX_AGE_SECONDS}" ]; then
+    return 1
+  fi
+
+  printf 'stealing stale backup lock %s: age %ss exceeds %ss (previous owner likely killed)\n' \
+    "${LOCK_DIR}" "${lock_age_seconds}" "${LOCK_MAX_AGE_SECONDS}" >&2
+  rm -rf "${LOCK_DIR}" >/dev/null 2>&1 || true
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s (stolen)\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  return 1
+}
+
+release_lock() {
+  rm -f "${LOCK_DIR}/owner" >/dev/null 2>&1 || true
+  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+# Оценка потребности по предыдущей копии (buckets.tsv): доступного места на
+# BACKUP_ROOT должно хватать на размер + headroom + резерв. Первая копия
+# оценки не имеет — пропускаем
+ensure_free_space() {
+  latest_backup_dir="$(ls -1dt "${BACKUP_ROOT}"/backup-* 2>/dev/null | head -n 1 || true)"
+
+  if [ -z "${latest_backup_dir}" ] || [ ! -f "${latest_backup_dir}/buckets.tsv" ]; then
+    return 0
+  fi
+
+  estimated_bytes="$(awk -F'|' 'NF >= 3 { total += $3 } END { printf "%d", total + 0 }' \
+    "${latest_backup_dir}/buckets.tsv")"
+
+  if [ "${estimated_bytes}" -le 0 ]; then
+    return 0
+  fi
+
+  required_bytes=$(( estimated_bytes * (100 + FREE_SPACE_HEADROOM_PERCENT) / 100 + FREE_SPACE_MIN_RESERVE_BYTES ))
+  available_bytes="$(df -Pk "${BACKUP_ROOT}" 2>/dev/null | awk 'NR == 2 { printf "%d", $4 * 1024 }')"
+
+  if [ -z "${available_bytes}" ] || [ "${available_bytes}" -le 0 ]; then
+    return 0
+  fi
+
+  if [ "${available_bytes}" -lt "${required_bytes}" ]; then
+    printf 'not enough free space on %s: available %s, required %s (previous backup %s + %s%% headroom + %s reserve)\n' \
+      "${BACKUP_ROOT}" \
+      "$(format_size "${available_bytes}")" \
+      "$(format_size "${required_bytes}")" \
+      "$(format_size "${estimated_bytes}")" \
+      "${FREE_SPACE_HEADROOM_PERCENT}" \
+      "$(format_size "${FREE_SPACE_MIN_RESERVE_BYTES}")" >&2
+    return 1
+  fi
+
+  return 0
+}
+
 cleanup() {
   if [ -n "${STAGING_DIR}" ] && [ -d "${STAGING_DIR}" ]; then
     rm -rf "${STAGING_DIR}" >/dev/null 2>&1 || true
   fi
-  rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+  release_lock
 }
 
 prune_old_backups() {
@@ -86,12 +163,19 @@ if [ -n "${JOB_PACKAGES:-}" ]; then
   apk add --no-cache ${JOB_PACKAGES} >/dev/null
 fi
 
+# Alpine пакует MinIO client с бинарником mcli — переименование из-за конфликта
+# с midnight commander (minio/mc CONFLICT.md). Приводим к каноничному имени mc,
+# остальной скрипт работает только с ним
+if ! command -v mc >/dev/null 2>&1 && command -v mcli >/dev/null 2>&1; then
+  ln -sf "$(command -v mcli)" /usr/local/bin/mc
+fi
+
 command -v mc >/dev/null 2>&1 || {
-  printf 'mc client is not available in the job image\n' >&2
+  printf 'mc client is not available in the job image (alpine minio-client installs mcli; expected mc or mcli on PATH)\n' >&2
   exit 1
 }
 
-if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+if ! acquire_lock "backup-${TIMESTAMP}"; then
   printf 'backup lock is already held in %s\n' "${LOCK_DIR}" >&2
   exit 1
 fi
@@ -105,11 +189,25 @@ mc alias set "${SOURCE_ALIAS}" \
 
 mkdir -p "${METADATA_DIR}" "${LISTINGS_DIR}"
 
-mc ls "${SOURCE_ALIAS}/" | awk '$NF ~ /\/$/ { print substr($NF, 1, length($NF) - 1) }' > "${BUCKETS_PATH}"
+if ! ensure_free_space; then
+  exit 1
+fi
+
+# JSON вместо парсинга текстового вывода mc: формат колонок плавает между
+# версиями, а версия клиента — за alpine-репозиторием
+mc ls --json "${SOURCE_ALIAS}/" > "${BUCKETS_JSON_PATH}"
+
+raw_listing_count="$(wc -l < "${BUCKETS_JSON_PATH}" | tr -d '[:space:]')"
+if [ "${raw_listing_count}" -eq 0 ]; then
+  printf 'no buckets found on source MinIO instance\n' >&2
+  exit 1
+fi
+
+jq -r 'select(.type == "folder") | .key | rtrimstr("/")' "${BUCKETS_JSON_PATH}" > "${BUCKETS_PATH}"
 
 bucket_count="$(wc -l < "${BUCKETS_PATH}" | tr -d '[:space:]')"
 if [ "${bucket_count}" -eq 0 ]; then
-  printf 'no buckets found on source MinIO instance\n' >&2
+  printf 'bucket discovery failed: mc ls --json returned %s entries but none parsed as folders\n' "${raw_listing_count}" >&2
   exit 1
 fi
 
@@ -127,6 +225,7 @@ while IFS= read -r bucket_name; do
   total_bytes="$(du -sb "${bucket_dir}" | cut -f1)"
 
   (cd "${bucket_dir}" && find . -type f | sort) > "${LISTINGS_DIR}/${bucket_name}.listing.txt"
+  (cd "${bucket_dir}" && find . -type f -print0 | sort -z | xargs -0 -r md5sum) > "${LISTINGS_DIR}/${bucket_name}.md5"
 
   printf '%s|%s|%s\n' "${bucket_name}" "${object_count}" "${total_bytes}" >> "${BUCKETS_TSV_PATH}"
 
@@ -181,7 +280,7 @@ printf 'source_endpoint=%s\n' "${SOURCE_MINIO_ENDPOINT}" >> "${BACKUP_META_PATH}
 printf 'source_alias=%s\n' "${SOURCE_ALIAS}" >> "${BACKUP_META_PATH}"
 printf 'mirrored_buckets=%s\n' "${MIRRORED_BUCKET_COUNT}" >> "${BACKUP_META_PATH}"
 
-rm -f "${BUCKETS_PATH}"
+rm -f "${BUCKETS_PATH}" "${BUCKETS_JSON_PATH}"
 mv "${STAGING_DIR}" "${FINAL_BACKUP_DIR}"
 STAGING_DIR=""
 

@@ -17,6 +17,15 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 
 ## Working Rules
 
+- Runtime-устанавливаемые в job-скриптах CLI-инструменты проверять по
+  каноническому имени с fallback на имя дистрибутива: дистрибутивы
+  переименовывают бинарники (пример: alpine `minio-client` ставит `mcli`, а
+  не `mc`). После установки пакета создавать compatibility-symlink на
+  каноничное имя (`ln -sf "$(command -v mcli)" /usr/local/bin/mc`) до
+  `command -v`-проверки; сообщение об ошибке должно называть оба имени.
+  Тестировать такие скрипты с абсолютными PATH — относительный PATH в
+  локальных тестах создаёт битые symlink-и и даёт ложные результаты.
+
 - PostgreSQL bootstrap (напрямую и через Kubernetes Job) создаёт только
   отсутствующие user/DB. Никогда не менять пароль/атрибуты существующего
   пользователя или владельца существующей БД. До создания БД проверять

@@ -7,9 +7,13 @@ minio_backup_monitoring_check_schedule: "0 18 * * *"  # noqa var-naming[no-role-
 minio_backup_monitoring_timezone: Europe/Moscow  # noqa var-naming[no-role-prefix]
 
 minio_backup_monitoring_job_image: alpine:3.22  # noqa var-naming[no-role-prefix]
+# jq парсит `mc ls --json`, findutils даёт GNU find/xargs с -print0/-0 для
+# checksum-манифестов; скрипты роли рассчитывают на их наличие
 minio_backup_monitoring_job_packages:  # noqa var-naming[no-role-prefix]
   - minio-client
   - coreutils
+  - findutils
+  - jq
   - curl
   - unzip
 
@@ -45,9 +49,35 @@ minio_backup_monitoring_successful_jobs_history_limit: 2  # noqa var-naming[no-r
 minio_backup_monitoring_failed_jobs_history_limit: 5  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_job_ttl_seconds: 86400  # noqa var-naming[no-role-prefix]
 
+# Жёсткие границы времени выполнения Job: зависший по сети/NFS mc mirror не
+# держит NFS-лок вечно (activeDeadlineSeconds -> SIGTERM, trap успевает
+# отпустить лок; SIGKILL-случай покрывает steal-логика лока ниже)
+minio_backup_monitoring_backup_active_deadline_seconds: 14400  # noqa var-naming[no-role-prefix]
+minio_backup_monitoring_check_active_deadline_seconds: 7200  # noqa var-naming[no-role-prefix]
+minio_backup_monitoring_restore_active_deadline_seconds: 14400  # noqa var-naming[no-role-prefix]
+
+# Лок старше порога считается брошенным (владелец гарантированно убит своим
+# activeDeadlineSeconds) и захватывается следующим джобом с warning в лог.
+# Порог обязан превышать самый большой дедлайн джобов
+minio_backup_monitoring_lock_max_age_seconds: 18000  # noqa var-naming[no-role-prefix]
+
+# Freshness-проверка: последняя копия старше порога (расписание + буфер,
+# бэкап еженедельный) = failed + Teams, даже если сама копия консистентна
+minio_backup_monitoring_backup_max_age_seconds: 691200  # noqa var-naming[no-role-prefix]
+
+# Pre-flight свободного места: оценка = размер предыдущей копии из buckets.tsv
+# + headroom % + фиксированный резерв; при нехватке бэкап падает сразу,
+# до зеркалирования
+minio_backup_monitoring_free_space_headroom_percent: 15  # noqa var-naming[no-role-prefix]
+minio_backup_monitoring_free_space_min_reserve_bytes: 1073741824  # noqa var-naming[no-role-prefix]
+
 minio_backup_monitoring_restore_job_name: minio-backup-monitoring-restore  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_restore_bucket: ""  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_restore_backup_name: ""  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_restore_request_id: manual  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_restore_wait_retries: 180  # noqa var-naming[no-role-prefix]
 minio_backup_monitoring_restore_wait_delay: 10  # noqa var-naming[no-role-prefix]
+# Явный opt-in: импортировать bucket/IAM метаданные из выбранной копии перед
+# восстановлением объектов (mc admin cluster bucket/iam import). Опасно на
+# живом инстансе с уже настроенными политиками — только для DR
+minio_backup_monitoring_restore_import_metadata: false  # noqa var-naming[no-role-prefix]

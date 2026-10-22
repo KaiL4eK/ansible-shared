@@ -66,13 +66,18 @@ Before working with this repository, install Ansible dependencies:
 - `roles/k8s/postgresql-backup-monitoring/` provides shared Kubernetes backup
   monitoring for PostgreSQL: scheduled `pg_dump` backups to a dedicated PVC,
   restore verification against an ephemeral (non-persistent) verification
-  database, Microsoft Teams failure notifications and an on-demand restore Job
-  driven by consumer playbooks.
+  database, backup freshness checks with stale NFS-lock recovery and job
+  active deadlines, Microsoft Teams failure notifications and an on-demand
+  restore Job driven by consumer playbooks.
 - `roles/k8s/minio-backup-monitoring/` provides shared Kubernetes backup
   monitoring for MinIO: scheduled `mc mirror` bucket backups with bucket/IAM
   metadata export to a dedicated PVC, lightweight consistency verification of
-  stored objects and metadata archives, Microsoft Teams failure notifications
-  and an on-demand per-bucket restore Job driven by consumer playbooks.
+  stored objects and metadata archives (object counts, sizes, listings and
+  md5 checksum manifests), backup freshness checks with stale NFS-lock
+  recovery, job active deadlines, free-space pre-flight, Microsoft Teams
+  failure notifications and an on-demand per-bucket restore Job (optional
+  bucket/IAM metadata import for disaster recovery) driven by consumer
+  playbooks.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
   service.
 - `roles/hermes/agent_env/` manages explicit Hermes environment values in the

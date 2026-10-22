@@ -3,10 +3,12 @@ set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-{{ minio_backup_monitoring_backup_root }}}"
 LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ minio_backup_monitoring_lock_dir_name }}}"
+LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ minio_backup_monitoring_lock_max_age_seconds }}}"
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 SOURCE_ALIAS="${SOURCE_ALIAS:-{{ minio_backup_monitoring_source_alias }}}"
 RESTORE_BUCKET="${RESTORE_BUCKET:-}"
 RESTORE_BACKUP_NAME="${RESTORE_BACKUP_NAME:-}"
+RESTORE_IMPORT_METADATA="${RESTORE_IMPORT_METADATA:-0}"
 
 log_info() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -52,8 +54,42 @@ format_duration() {
   printf '%ds' "${seconds}"
 }
 
-cleanup() {
+# Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
+# LOCK_MAX_AGE_SECONDS (activeDeadlineSeconds), брошенный лок забираем сами
+acquire_lock() {
+  lock_owner="$1"
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  lock_mtime="$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || printf '0')"
+  lock_age_seconds=$(( $(date +%s) - lock_mtime ))
+
+  if [ "${lock_age_seconds}" -lt "${LOCK_MAX_AGE_SECONDS}" ]; then
+    return 1
+  fi
+
+  printf 'stealing stale backup lock %s: age %ss exceeds %ss (previous owner likely killed)\n' \
+    "${LOCK_DIR}" "${lock_age_seconds}" "${LOCK_MAX_AGE_SECONDS}" >&2
+  rm -rf "${LOCK_DIR}" >/dev/null 2>&1 || true
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s (stolen)\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  return 1
+}
+
+release_lock() {
+  rm -f "${LOCK_DIR}/owner" >/dev/null 2>&1 || true
   rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+}
+
+cleanup() {
+  release_lock
 }
 
 if [ -z "${RESTORE_BUCKET}" ]; then
@@ -65,18 +101,20 @@ if [ -n "${JOB_PACKAGES:-}" ]; then
   apk add --no-cache ${JOB_PACKAGES} >/dev/null
 fi
 
+# Alpine пакует MinIO client с бинарником mcli — переименование из-за конфликта
+# с midnight commander (minio/mc CONFLICT.md). Приводим к каноничному имени mc,
+# остальной скрипт работает только с ним
+if ! command -v mc >/dev/null 2>&1 && command -v mcli >/dev/null 2>&1; then
+  ln -sf "$(command -v mcli)" /usr/local/bin/mc
+fi
+
 command -v mc >/dev/null 2>&1 || {
-  printf 'mc client is not available in the job image\n' >&2
+  printf 'mc client is not available in the job image (alpine minio-client installs mcli; expected mc or mcli on PATH)\n' >&2
   exit 1
 }
 
-if [ -d "${LOCK_DIR}" ]; then
+if ! acquire_lock "restore-${RESTORE_BUCKET}"; then
   printf 'backup lock is currently held by another job\n' >&2
-  exit 1
-fi
-
-if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-  printf 'failed to acquire backup lock\n' >&2
   exit 1
 fi
 
@@ -132,6 +170,19 @@ mc alias set "${SOURCE_ALIAS}" \
   "${SOURCE_MINIO_ENDPOINT}" \
   "${SOURCE_MINIO_ACCESS_KEY}" \
   "${SOURCE_MINIO_SECRET_KEY}" >/dev/null
+
+if [ "${RESTORE_IMPORT_METADATA}" = "1" ]; then
+  log_info "importing bucket metadata from ${BACKUP_NAME}/metadata/bucket-metadata.zip"
+  mc admin cluster bucket import "${SOURCE_ALIAS}" "${BACKUP_PATH}/metadata/bucket-metadata.zip"
+
+  log_info "importing IAM metadata from ${BACKUP_NAME}/metadata/iam-metadata.zip"
+  mc admin cluster iam import "${SOURCE_ALIAS}" "${BACKUP_PATH}/metadata/iam-metadata.zip"
+fi
+
+# Бакет может отсутствовать (потеря инстанса, restore в чистый MinIO) —
+# восстанавливаем до mirror, иначе mc mirror упадёт
+log_info "ensuring target bucket ${RESTORE_BUCKET} exists"
+mc mb --ignore-existing "${SOURCE_ALIAS}/${RESTORE_BUCKET}"
 
 restore_started_at="$(date +%s)"
 log_info "restoring bucket ${RESTORE_BUCKET} from ${BACKUP_NAME} (existing objects are overwritten, extra destination objects are kept)"

@@ -41,6 +41,24 @@
       backup_monitoring_ignored_databases must contain only database names.
   loop: "{{ backup_monitoring_ignored_databases }}"
 
+- name: Assert PostgreSQL backup monitoring timing thresholds are consistent
+  ansible.builtin.assert:
+    that:
+      - backup_monitoring_backup_active_deadline_seconds | int > 0
+      - backup_monitoring_check_active_deadline_seconds | int > 0
+      - backup_monitoring_restore_active_deadline_seconds | int > 0
+      - backup_monitoring_lock_max_age_seconds | int > ([
+          backup_monitoring_backup_active_deadline_seconds | int,
+          backup_monitoring_check_active_deadline_seconds | int,
+          backup_monitoring_restore_active_deadline_seconds | int
+        ] | max)
+      - backup_monitoring_backup_max_age_seconds | int > 0
+    fail_msg: >-
+      Timing thresholds are inconsistent: active deadlines must be positive,
+      backup_monitoring_lock_max_age_seconds must exceed every job active
+      deadline (otherwise a running job's lock could be stolen), freshness
+      age must be positive.
+
 - name: Ensure PostgreSQL backup monitoring namespace exists
   kubernetes.core.k8s:
     state: present
@@ -59,6 +77,9 @@
       metadata:
         name: "{{ backup_monitoring_service_account_name }}"
         namespace: "{{ backup_monitoring_namespace }}"
+      # Джобы работают только с NFS и PostgreSQL — токен API подмонтирован
+      # быть не должен
+      automountServiceAccountToken: false
 
 - name: Ensure PostgreSQL backup monitoring backup PVC exists
   kubernetes.core.k8s:
@@ -109,6 +130,7 @@
       stringData:
         BACKUP_ROOT: "{{ backup_monitoring_backup_root }}"
         LOCK_DIR_NAME: "{{ backup_monitoring_lock_dir_name }}"
+        LOCK_MAX_AGE_SECONDS: "{{ backup_monitoring_lock_max_age_seconds | string }}"
         SOURCE_DB_HOST: "{{ backup_monitoring_source_db_host }}"
         SOURCE_DB_PORT: "{{ backup_monitoring_source_db_port | string }}"
         SOURCE_DB_USER: "{{ backup_monitoring_source_db_user }}"
@@ -128,6 +150,8 @@
       stringData:
         BACKUP_ROOT: "{{ backup_monitoring_backup_root }}"
         LOCK_DIR_NAME: "{{ backup_monitoring_lock_dir_name }}"
+        LOCK_MAX_AGE_SECONDS: "{{ backup_monitoring_lock_max_age_seconds | string }}"
+        BACKUP_MAX_AGE_SECONDS: "{{ backup_monitoring_backup_max_age_seconds | string }}"
         CHECK_DB_HOST: "{{ backup_monitoring_db_internal_host }}"
         CHECK_DB_PORT: "{{ backup_monitoring_db_internal_port | string }}"
         CHECK_DB_USER: "{{ backup_monitoring_db_admin_user }}"

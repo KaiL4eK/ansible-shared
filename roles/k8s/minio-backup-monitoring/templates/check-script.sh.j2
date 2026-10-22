@@ -3,6 +3,8 @@ set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-{{ minio_backup_monitoring_backup_root }}}"
 LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ minio_backup_monitoring_lock_dir_name }}}"
+LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ minio_backup_monitoring_lock_max_age_seconds }}}"
+BACKUP_MAX_AGE_SECONDS="${BACKUP_MAX_AGE_SECONDS:-{{ minio_backup_monitoring_backup_max_age_seconds }}}"
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 VERIFICATION_RESULTS_FILE="${VERIFICATION_RESULTS_FILE:-{{ minio_backup_monitoring_verification_results_file }}}"
 LATEST_BACKUP=""
@@ -79,8 +81,38 @@ EOF
     "${TEAMS_WEBHOOK_URL}" >/dev/null 2>&1 || true
 }
 
+# Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
+# LOCK_MAX_AGE_SECONDS (activeDeadlineSeconds), брошенный лок забираем сами
+acquire_lock() {
+  lock_owner="$1"
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  lock_mtime="$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || printf '0')"
+  lock_age_seconds=$(( $(date +%s) - lock_mtime ))
+
+  if [ "${lock_age_seconds}" -lt "${LOCK_MAX_AGE_SECONDS}" ]; then
+    return 1
+  fi
+
+  printf 'stealing stale backup lock %s: age %ss exceeds %ss (previous owner likely killed)\n' \
+    "${LOCK_DIR}" "${lock_age_seconds}" "${LOCK_MAX_AGE_SECONDS}" >&2
+  rm -rf "${LOCK_DIR}" >/dev/null 2>&1 || true
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s (stolen)\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  return 1
+}
+
 cleanup() {
   if [ "${ACQUIRED_LOCK}" = "1" ]; then
+    rm -f "${LOCK_DIR}/owner" >/dev/null 2>&1 || true
     rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
   fi
 }
@@ -103,12 +135,8 @@ if [ -n "${JOB_PACKAGES:-}" ]; then
   apk add --no-cache ${JOB_PACKAGES} >/dev/null
 fi
 
-if [ -d "${LOCK_DIR}" ]; then
+if ! acquire_lock "check-$(date '+%Y%m%d-%H%M%S')"; then
   finish "skipped_locked" "backup lock is currently held by another job"
-fi
-
-if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-  finish "skipped_locked" "failed to acquire backup lock"
 fi
 
 ACQUIRED_LOCK=1
@@ -159,6 +187,17 @@ if [ ! -s "${METADATA_DIR}/cluster-config.txt" ]; then
   finish "failed" "cluster configuration export in ${LATEST_BACKUP} is empty"
 fi
 
+# Свежесть: консистентная, но устаревшая копия означает, что бэкапы не
+# создаются (падение CronJob бэкапа молчит — Teams шлёт только этот скрипт)
+if [ "${BACKUP_MAX_AGE_SECONDS}" -gt 0 ]; then
+  backup_mtime="$(stat -c %Y "${BACKUP_META_PATH}" 2>/dev/null || printf '0')"
+  backup_age_seconds=$(( $(date +%s) - backup_mtime ))
+  if [ "${backup_age_seconds}" -gt "${BACKUP_MAX_AGE_SECONDS}" ]; then
+    finish "failed" "latest backup ${LATEST_BACKUP} is stale: age ${backup_age_seconds}s exceeds limit ${BACKUP_MAX_AGE_SECONDS}s"
+  fi
+  log_info "backup ${LATEST_BACKUP} freshness: age ${backup_age_seconds}s (limit ${BACKUP_MAX_AGE_SECONDS}s)"
+fi
+
 CHECKED_BUCKET_COUNT=0
 while IFS='|' read -r bucket_name object_count total_bytes; do
   [ -n "${bucket_name}" ] || continue
@@ -176,6 +215,11 @@ while IFS='|' read -r bucket_name object_count total_bytes; do
     finish "failed" "object listing for bucket ${bucket_name} is missing in ${LATEST_BACKUP}"
   fi
 
+  checksum_path="${LATEST_BACKUP_PATH}/listings/${bucket_name}.md5"
+  if [ ! -f "${checksum_path}" ]; then
+    finish "failed" "checksum manifest for bucket ${bucket_name} is missing in ${LATEST_BACKUP}"
+  fi
+
   actual_count="$(find "${bucket_dir}" -type f | wc -l | tr -d '[:space:]')"
   if [ "${actual_count}" != "${object_count}" ]; then
     finish "failed" "object count mismatch for bucket ${bucket_name}: expected ${object_count}, found ${actual_count}"
@@ -190,6 +234,12 @@ while IFS='|' read -r bucket_name object_count total_bytes; do
   recorded_listing="$(cat "${listing_path}")"
   if [ "${regenerated_listing}" != "${recorded_listing}" ]; then
     finish "failed" "object listing for bucket ${bucket_name} no longer matches the backup manifest"
+  fi
+
+  # Контрольная сверка содержимого: счётчики и листинг имён не замечают
+  # повреждённый файл того же размера (bit rot на NFS)
+  if ! (cd "${bucket_dir}" && md5sum -c "${checksum_path}" >/dev/null 2>&1); then
+    finish "failed" "checksum verification failed for bucket ${bucket_name} in ${LATEST_BACKUP}"
   fi
 
   log_info "bucket ${bucket_name} verified: objects=${object_count}, size=$(format_size "${total_bytes}")"

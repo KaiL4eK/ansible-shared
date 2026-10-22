@@ -3,6 +3,8 @@ set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-{{ backup_monitoring_backup_root }}}"
 LOCK_DIR_NAME="${LOCK_DIR_NAME:-{{ backup_monitoring_lock_dir_name }}}"
+LOCK_MAX_AGE_SECONDS="${LOCK_MAX_AGE_SECONDS:-{{ backup_monitoring_lock_max_age_seconds }}}"
+BACKUP_MAX_AGE_SECONDS="${BACKUP_MAX_AGE_SECONDS:-{{ backup_monitoring_backup_max_age_seconds }}}"
 LOCK_DIR="${BACKUP_ROOT}/${LOCK_DIR_NAME}"
 WORK_DIR="/tmp/backup-check-$$"
 LATEST_BACKUP=""
@@ -194,8 +196,38 @@ EOF
     "${TEAMS_WEBHOOK_URL}" >/dev/null 2>&1 || true
 }
 
+# Лок живёт на NFS и переживает под: владелец гарантированно мёртв после
+# LOCK_MAX_AGE_SECONDS (activeDeadlineSeconds), брошенный лок забираем сами
+acquire_lock() {
+  lock_owner="$1"
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  lock_mtime="$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || printf '0')"
+  lock_age_seconds=$(( $(date +%s) - lock_mtime ))
+
+  if [ "${lock_age_seconds}" -lt "${LOCK_MAX_AGE_SECONDS}" ]; then
+    return 1
+  fi
+
+  printf 'stealing stale backup lock %s: age %ss exceeds %ss (previous owner likely killed)\n' \
+    "${LOCK_DIR}" "${lock_age_seconds}" "${LOCK_MAX_AGE_SECONDS}" >&2
+  rm -rf "${LOCK_DIR}" >/dev/null 2>&1 || true
+
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    printf '%s %s (stolen)\n' "${lock_owner}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${LOCK_DIR}/owner"
+    return 0
+  fi
+
+  return 1
+}
+
 cleanup() {
   if [ "${ACQUIRED_LOCK}" = "1" ]; then
+    rm -f "${LOCK_DIR}/owner" >/dev/null 2>&1 || true
     rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
   fi
   rm -rf "${WORK_DIR}" >/dev/null 2>&1 || true
@@ -215,12 +247,8 @@ finish() {
   exit 1
 }
 
-if [ -d "${LOCK_DIR}" ]; then
+if ! acquire_lock "check-$(date '+%Y%m%d-%H%M%S')"; then
   finish "skipped_locked" "backup lock is currently held by another job"
-fi
-
-if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-  finish "skipped_locked" "failed to acquire backup lock"
 fi
 
 ACQUIRED_LOCK=1
@@ -238,6 +266,17 @@ LATEST_MTIME="$(stat -c '%y' "${LATEST_BACKUP_PATH}" 2>/dev/null | cut -d'.' -f1
 
 if [ ! -d "${LATEST_BACKUP_PATH}" ]; then
   finish "failed" "backup path ${LATEST_BACKUP} is not a directory"
+fi
+
+# Свежесть: консистентная, но устаревшая копия означает, что бэкапы не
+# создаются (падение CronJob бэкапа молчит — Teams шлёт только этот скрипт)
+if [ "${BACKUP_MAX_AGE_SECONDS}" -gt 0 ]; then
+  backup_mtime_epoch="$(stat -c %Y "${LATEST_BACKUP_PATH}" 2>/dev/null || printf '0')"
+  backup_age_seconds=$(( $(date +%s) - backup_mtime_epoch ))
+  if [ "${backup_age_seconds}" -gt "${BACKUP_MAX_AGE_SECONDS}" ]; then
+    finish "failed" "latest backup ${LATEST_BACKUP} is stale: age ${backup_age_seconds}s exceeds limit ${BACKUP_MAX_AGE_SECONDS}s"
+  fi
+  log_info "backup ${LATEST_BACKUP} freshness: age ${backup_age_seconds}s (limit ${BACKUP_MAX_AGE_SECONDS}s)"
 fi
 
 ARCHIVE_DIR="${LATEST_BACKUP_PATH}"

@@ -29,6 +29,26 @@
       Alpine package names.
   loop: "{{ minio_backup_monitoring_job_packages }}"
 
+- name: Assert MinIO backup monitoring timing thresholds are consistent
+  ansible.builtin.assert:
+    that:
+      - minio_backup_monitoring_backup_active_deadline_seconds | int > 0
+      - minio_backup_monitoring_check_active_deadline_seconds | int > 0
+      - minio_backup_monitoring_restore_active_deadline_seconds | int > 0
+      - minio_backup_monitoring_lock_max_age_seconds | int > ([
+          minio_backup_monitoring_backup_active_deadline_seconds | int,
+          minio_backup_monitoring_check_active_deadline_seconds | int,
+          minio_backup_monitoring_restore_active_deadline_seconds | int
+        ] | max)
+      - minio_backup_monitoring_backup_max_age_seconds | int > 0
+      - minio_backup_monitoring_free_space_headroom_percent | int >= 0
+      - minio_backup_monitoring_free_space_min_reserve_bytes | int >= 0
+    fail_msg: >-
+      Timing thresholds are inconsistent: active deadlines must be positive,
+      minio_backup_monitoring_lock_max_age_seconds must exceed every job
+      active deadline (otherwise a running job's lock could be stolen),
+      freshness age and free-space reserve must be non-negative.
+
 - name: Ensure MinIO backup monitoring namespace exists
   kubernetes.core.k8s:
     state: present
@@ -47,6 +67,8 @@
       metadata:
         name: "{{ minio_backup_monitoring_service_account_name }}"
         namespace: "{{ minio_backup_monitoring_namespace }}"
+      # Джобы работают только с NFS и S3 — токен API подмонтирован быть не должен
+      automountServiceAccountToken: false
 
 - name: Ensure MinIO backup monitoring backup PVC exists
   kubernetes.core.k8s:
@@ -78,6 +100,9 @@
       stringData:
         BACKUP_ROOT: "{{ minio_backup_monitoring_backup_root }}"
         LOCK_DIR_NAME: "{{ minio_backup_monitoring_lock_dir_name }}"
+        LOCK_MAX_AGE_SECONDS: "{{ minio_backup_monitoring_lock_max_age_seconds | string }}"
+        FREE_SPACE_HEADROOM_PERCENT: "{{ minio_backup_monitoring_free_space_headroom_percent | string }}"
+        FREE_SPACE_MIN_RESERVE_BYTES: "{{ minio_backup_monitoring_free_space_min_reserve_bytes | string }}"
         BACKUP_RETENTION_COUNT: "{{ minio_backup_monitoring_backup_retention_count | string }}"
         SOURCE_ALIAS: "{{ minio_backup_monitoring_source_alias }}"
         SOURCE_MINIO_ENDPOINT: "{{ minio_backup_monitoring_source_endpoint }}"
@@ -99,6 +124,8 @@
       stringData:
         BACKUP_ROOT: "{{ minio_backup_monitoring_backup_root }}"
         LOCK_DIR_NAME: "{{ minio_backup_monitoring_lock_dir_name }}"
+        LOCK_MAX_AGE_SECONDS: "{{ minio_backup_monitoring_lock_max_age_seconds | string }}"
+        BACKUP_MAX_AGE_SECONDS: "{{ minio_backup_monitoring_backup_max_age_seconds | string }}"
         VERIFICATION_RESULTS_FILE: "{{ minio_backup_monitoring_verification_results_file }}"
         TEAMS_WEBHOOK_URL: "{{ minio_backup_monitoring_teams_webhook_url }}"
         JOB_PACKAGES: "{{ minio_backup_monitoring_job_packages | join(' ') }}"
