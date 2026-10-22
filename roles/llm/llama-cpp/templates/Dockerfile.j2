@@ -10,11 +10,14 @@ COPY . .
 # library shipped with the toolkit, otherwise CMake fails to link libcuda.
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 
-{% set cmake_extra = (llama_cpp_build_config | default({})).items() | map('printf', '-D%s=%s') | join(' ') %}
+{% set cmake_extra_parts = [] %}
+{% for key, value in (llama_cpp_build_config | default({})).items() %}
+{% set _ = cmake_extra_parts.append('-D' ~ key ~ '=' ~ (value | string)) %}
+{% endfor %}
 RUN cmake -S . -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DLLAMA_BUILD_TESTS=OFF \
     -DCMAKE_CUDA_ARCHITECTURES={{ llama_cpp_cuda_architectures | quote }} \
     -DCMAKE_BUILD_TYPE=Release \
-    {{ cmake_extra }} \
+    {{ cmake_extra_parts | join(' ') }} \
     && cmake --build build --target llama-server --parallel {{ llama_cpp_build_parallelism }}
 
 FROM docker.io/nvidia/cuda:{{ llama_cpp_cuda_version }}-runtime-ubuntu24.04
