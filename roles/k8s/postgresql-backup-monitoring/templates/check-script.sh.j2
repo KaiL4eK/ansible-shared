@@ -138,18 +138,22 @@ SQL
 # Расширения из дампа восстанавливаются не через pg_restore: не-trusted
 # расширения (например pg_stat_statements) может создавать только
 # суперпользователь, а restore идёт с SET ROLE владельца базы. TOC-записи
-# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь.
+# EXTENSION/COMMENT вырезаются, расширения заранее создаёт суперпользователь
+# — В ТОЙ ЖЕ СХЕМЕ, что и в источнике (WITH SCHEMA из дампа): pg_dump
+# рендерит opclass/функции расширения unqualified, если оно живёт в
+# pg_catalog (всегда видимом), а pg_restore выполняет restore с пустым
+# search_path — расширение в public сломало бы резолв (ADR-49).
 precreate_extensions() {
   restore_db_name="$1"
   ext_list_path="$2"
 
   [ -s "${ext_list_path}" ] || return 0
 
-  while IFS= read -r ext_name; do
+  while IFS='|' read -r ext_name ext_schema; do
     [ -n "${ext_name}" ] || continue
 
-    if ! run_psql_on_db "${restore_db_name}" -v ext_name="${ext_name}" <<'SQL' >/dev/null 2>&1
-SELECT format('CREATE EXTENSION IF NOT EXISTS %I', :'ext_name') \gexec
+    if ! run_psql_on_db "${restore_db_name}" -v ext_name="${ext_name}" -v ext_schema="${ext_schema}" <<'SQL' >/dev/null 2>&1
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I WITH SCHEMA %I', :'ext_name', :'ext_schema') \gexec
 SQL
     then
       return 1
@@ -220,13 +224,24 @@ VALUES (
 SQL
 }
 
+# Занятый лок тоже достоин карточки: проверка не выполнилась, и без
+# уведомления это видно только в логе пода (ADR-47: коллизия лока —
+# аномалия, о которой стоит узнавать)
 notify_failure() {
   status="$1"
   details="$2"
   backup_file="$3"
 
-  if [ "${status}" = "ok" ] || [ "${status}" = "skipped_locked" ] || [ -z "${TEAMS_WEBHOOK_URL}" ]; then
+  if [ "${status}" = "ok" ] || [ -z "${TEAMS_WEBHOOK_URL}" ]; then
     return 0
+  fi
+
+  if [ "${status}" = "skipped_locked" ]; then
+    theme_color="FFA500"
+    card_title="PostgreSQL backup verification skipped"
+  else
+    theme_color="E81123"
+    card_title="PostgreSQL backup verification failed"
   fi
 
   safe_hostname="$(sanitize_json "$(hostname)")"
@@ -234,7 +249,7 @@ notify_failure() {
   safe_backup="$(sanitize_json "${backup_file:-none}")"
   safe_details="$(sanitize_json "${details}")"
   payload=$(cat <<EOF
-{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"E81123","summary":"PostgreSQL backup verification failed","title":"PostgreSQL backup verification failed","sections":[{"facts":[{"name":"Host","value":"${safe_hostname}"},{"name":"Status","value":"${safe_status}"},{"name":"Backup","value":"${safe_backup}"}],"text":"${safe_details}"}]}
+{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"${theme_color}","summary":"${card_title}","title":"${card_title}","sections":[{"facts":[{"name":"Host","value":"${safe_hostname}"},{"name":"Status","value":"${safe_status}"},{"name":"Backup","value":"${safe_backup}"}],"text":"${safe_details}"}]}
 EOF
 )
 
@@ -399,7 +414,11 @@ while IFS='|' read -r source_db_name db_owner dump_file; do
     -e '/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - /d' \
     -e '/^[0-9]+; [0-9]+ [0-9]+ COMMENT - EXTENSION /d' \
     "${toc_path}" > "${toc_filtered_path}"
-  sed -n -E 's/^[0-9]+; [0-9]+ [0-9]+ EXTENSION - ([A-Za-z0-9_.-]+).*/\1/p' "${toc_path}" > "${ext_list_path}"
+  # Схема каждого расширения берётся из дампа (--section=pre-data: дёшево,
+  # без COPY-данных): precreate обязан воспроизвести схему источника
+  PGPASSWORD="${CHECK_DB_PASSWORD}" pg_restore -f - --section=pre-data "${dump_path}" 2>/dev/null \
+    | sed -n 's/^CREATE EXTENSION IF NOT EXISTS \([A-Za-z0-9_.-][A-Za-z0-9_.-]*\) WITH SCHEMA \([A-Za-z0-9_]*\);.*/\1|\2/p' \
+    > "${ext_list_path}"
 
   if [ -s "${ext_list_path}" ]; then
     log_info "pre-creating extensions for ${source_db_name}: $(tr '\n' ' ' < "${ext_list_path}")"

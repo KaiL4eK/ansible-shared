@@ -31,6 +31,19 @@ backup_monitoring_db_release_name: postgresql-backup-monitoring-postgresql  # no
 backup_monitoring_db_chart_version: 16.7.27  # noqa var-naming[no-role-prefix]
 backup_monitoring_db_admin_user: postgres  # noqa var-naming[no-role-prefix]
 backup_monitoring_db_admin_password: ""  # noqa var-naming[no-role-prefix]
+
+# Verification-БД прогоняет полные restore всех копий: дефолтных ресурсов
+# чарта bitnami (requests 128Mi / limits 192Mi) при shared_buffers 128MB
+# не хватает — cgroup-OOM во время восстановления (checkpointer/backend
+# убиваются signal 9, pg_restore рвёт соединение). Память — с запасом на
+# restore, autovacuum вставок и crash-recovery (ADR-06).
+backup_monitoring_db_resources:  # noqa var-naming[no-role-prefix]
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
 backup_monitoring_check_db_name: postgres  # noqa var-naming[no-role-prefix]
 backup_monitoring_db_internal_host: >-  # noqa var-naming[no-role-prefix]
   {{ backup_monitoring_db_release_name ~ '.' ~

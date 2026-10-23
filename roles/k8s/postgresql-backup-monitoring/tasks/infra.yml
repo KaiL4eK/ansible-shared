@@ -116,6 +116,7 @@
       primary:
         persistence:
           enabled: false
+        resources: "{{ backup_monitoring_db_resources }}"
 
 - name: Ensure PostgreSQL backup monitoring backup runtime Secret exists
   kubernetes.core.k8s:
