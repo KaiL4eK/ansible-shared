@@ -4,3 +4,7 @@
 
 - name: Start llama.cpp service
   ansible.builtin.import_tasks: start.yml
+
+- name: Verify llama.cpp service with API requests
+  ansible.builtin.import_tasks: verify.yml
+  when: llama_cpp_verify_enabled | bool

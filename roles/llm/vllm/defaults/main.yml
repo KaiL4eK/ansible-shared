@@ -1,3 +1,4 @@
+---
 vllm_model_name: ""
 vllm_served_model_name: ""
 
@@ -74,3 +75,21 @@ vllm_override_generation_config:
 # deployment via vllm_ipc_host / vllm_ulimits.
 vllm_ipc_host: false
 vllm_ulimits: {}
+
+# --- Optional post-deploy verification ---------------------------------------
+# When enabled, after the service becomes healthy the role sends
+# GET /v1/models and one small /v1/chat/completions request and asserts
+# meaningful responses. Requests are sent from the Ansible controller to
+# http://<host default IPv4>:<vllm_port>, so that address must be reachable
+# from the controller.
+vllm_verify_enabled: false
+# Per-request timeout in seconds.
+vllm_verify_timeout: 300
+# Sampling settings for the verification completion (deterministic by default).
+vllm_verify_max_tokens: 512
+vllm_verify_temperature: 0
+# Prompt for the verification completion; non-empty assistant content is
+# required for the check to pass.
+vllm_verify_prompt: "Reply with exactly one word: OK"
+# Optional case-insensitive substring expected in the completion content.
+vllm_verify_expect_contains: ""

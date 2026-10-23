@@ -33,3 +33,26 @@ The following optional variables configure long-prefill scheduling and the
 Mamba SSM cache: `vllm_watermark`, `vllm_mamba_ssm_cache_dtype`,
 `vllm_max_num_partial_prefills`, `vllm_max_long_partial_prefills`, and
 `vllm_long_prefill_token_threshold`.
+
+## Post-deploy verification
+
+Set `vllm_verify_enabled: true` to verify the deployed server with real API
+requests after it becomes healthy:
+
+- `GET /v1/models` — the expected served model
+  (`vllm_served_model_name` or `vllm_model_name`) must be listed.
+- `POST /v1/chat/completions` with `vllm_verify_prompt` — non-empty assistant
+  content is required; when `vllm_verify_expect_contains` is set, that
+  case-insensitive substring must appear in the content.
+
+The Compose healthcheck only proves `/health` responds; these checks prove the
+model is actually served and generates text.
+
+Additional variables (full defaults in `defaults/main.yml`):
+`vllm_verify_timeout` (per-request timeout in seconds), `vllm_verify_max_tokens`,
+`vllm_verify_temperature`, `vllm_verify_prompt`, `vllm_verify_expect_contains`.
+
+Requests are sent from the Ansible controller to
+`http://<host default IPv4>:<vllm_port>`, so that address must be reachable
+from the controller; enable the check only where the network allows it.
+`vllm_api_key` is used automatically and is never logged (`no_log`).

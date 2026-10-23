@@ -1,0 +1,102 @@
+---
+# Optional post-deploy verification (llama_cpp_verify_enabled): issue real API
+# requests against the running server and assert meaningful responses.
+# The Compose healthcheck only proves /health responds; these checks prove
+# the model is actually loaded and generates text.
+- name: Resolve verification base URL
+  ansible.builtin.set_fact:
+    llama_cpp_verify_base_url: "http://{{ ansible_default_ipv4.address }}:{{ llama_cpp_port }}"
+
+- name: Prepare verification API headers
+  ansible.builtin.set_fact:
+    llama_cpp_verify_headers: >-
+      {{ {'Authorization': 'Bearer ' ~ (llama_cpp_api_key | string)}
+         if (llama_cpp_api_key | default('', true) | string | length > 0) else {} }}
+  no_log: true
+
+- name: Request served models for verification
+  ansible.builtin.uri:
+    url: "{{ llama_cpp_verify_base_url }}/v1/models"
+    headers: "{{ llama_cpp_verify_headers }}"
+    return_content: true
+    timeout: "{{ llama_cpp_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: llama_cpp_verify_models
+
+- name: Verify served models response
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_verify_models.status == 200
+      - (llama_cpp_verify_models.json | default({}, true)).data | default([]) | length > 0
+    fail_msg: >-
+      Models verification failed for {{ llama_cpp_verify_base_url }}/v1/models:
+      no served models found.
+      HTTP status: {{ llama_cpp_verify_models.status | default('n/a') }};
+      detail: {{ llama_cpp_verify_models.msg | default('') | truncate(300) }};
+      body: {{ llama_cpp_verify_models.content | default('') | truncate(300) }}
+
+- name: Resolve served model id
+  ansible.builtin.set_fact:
+    llama_cpp_verify_model_id: "{{ llama_cpp_verify_models.json.data[0].id }}"
+
+- name: Request verification chat completion
+  ansible.builtin.uri:
+    url: "{{ llama_cpp_verify_base_url }}/v1/chat/completions"
+    method: POST
+    headers: "{{ llama_cpp_verify_headers }}"
+    body_format: json
+    body:
+      model: "{{ llama_cpp_verify_model_id }}"
+      messages:
+        - role: user
+          content: "{{ llama_cpp_verify_prompt }}"
+      max_tokens: "{{ llama_cpp_verify_max_tokens | int }}"
+      temperature: "{{ llama_cpp_verify_temperature }}"
+    return_content: true
+    timeout: "{{ llama_cpp_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: llama_cpp_verify_completion
+
+- name: Verify chat completion HTTP response
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_verify_completion.status == 200
+      - llama_cpp_verify_completion.json is defined
+    fail_msg: >-
+      Chat completion verification failed for
+      {{ llama_cpp_verify_base_url }}/v1/chat/completions.
+      HTTP status: {{ llama_cpp_verify_completion.status | default('n/a') }};
+      detail: {{ llama_cpp_verify_completion.msg | default('') | truncate(300) }};
+      body: {{ llama_cpp_verify_completion.content | default('') | truncate(300) }}
+
+- name: Extract verification completion content
+  ansible.builtin.set_fact:
+    llama_cpp_verify_content: "{{ (llama_cpp_verify_completion.json.choices[0].message.content | default('', true)) | trim }}"
+
+- name: Verify chat completion content is not empty
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_verify_content | length > 0
+    fail_msg: >-
+      Chat completion returned empty content for prompt
+      '{{ llama_cpp_verify_prompt }}' (max_tokens={{ llama_cpp_verify_max_tokens }});
+      consider raising llama_cpp_verify_max_tokens or adjusting
+      llama_cpp_verify_prompt.
+      Body: {{ llama_cpp_verify_completion.content | default('') | truncate(300) }}
+
+- name: Verify expected content substring
+  ansible.builtin.assert:
+    that:
+      - llama_cpp_verify_expect_contains | lower in llama_cpp_verify_content | lower
+    fail_msg: >-
+      Expected '{{ llama_cpp_verify_expect_contains }}' in completion content:
+      {{ llama_cpp_verify_content | truncate(300) }}
+  when: llama_cpp_verify_expect_contains | length > 0
+
+- name: Show verification result
+  ansible.builtin.debug:
+    msg: >-
+      Verification OK: model {{ llama_cpp_verify_model_id }} replied:
+      {{ llama_cpp_verify_content | truncate(200) }}

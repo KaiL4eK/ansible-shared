@@ -87,3 +87,23 @@ llama_cpp_container_models_dir: /models
 llama_cpp_effective_image: null
 llama_cpp_source_checkout: {}
 llama_cpp_build_rendered: {}
+
+# --- Optional post-deploy verification ---------------------------------------
+# When enabled, after the service becomes healthy the role sends
+# GET /v1/models and one small /v1/chat/completions request and asserts
+# meaningful responses. The served model id is resolved from /v1/models
+# (first entry), so it works with and without an --alias. Requests are sent
+# from the Ansible controller to
+# http://<host default IPv4>:<llama_cpp_port>, so that address must be
+# reachable from the controller.
+llama_cpp_verify_enabled: false
+# Per-request timeout in seconds.
+llama_cpp_verify_timeout: 300
+# Sampling settings for the verification completion (deterministic by default).
+llama_cpp_verify_max_tokens: 512
+llama_cpp_verify_temperature: 0
+# Prompt for the verification completion; non-empty assistant content is
+# required for the check to pass.
+llama_cpp_verify_prompt: "Reply with exactly one word: OK"
+# Optional case-insensitive substring expected in the completion content.
+llama_cpp_verify_expect_contains: ""

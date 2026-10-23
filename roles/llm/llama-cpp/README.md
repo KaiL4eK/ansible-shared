@@ -63,6 +63,30 @@ Build-specific variables:
 With the build enabled the image is never pulled; the Compose project starts
 from the local image only.
 
+## Post-deploy verification
+
+Set `llama_cpp_verify_enabled: true` to verify the deployed server with real
+API requests after it becomes healthy:
+
+- `GET /v1/models` — at least one model must be served; its id is resolved
+  from the first entry, so it works with and without `--alias`.
+- `POST /v1/chat/completions` with `llama_cpp_verify_prompt` — non-empty
+  assistant content is required; when `llama_cpp_verify_expect_contains` is
+  set, that case-insensitive substring must appear in the content.
+
+The Compose healthcheck only proves `/health` responds; these checks prove the
+model is actually loaded and generates text.
+
+Additional variables (full defaults in `defaults/main.yml`):
+`llama_cpp_verify_timeout` (per-request timeout in seconds),
+`llama_cpp_verify_max_tokens`, `llama_cpp_verify_temperature`,
+`llama_cpp_verify_prompt`, `llama_cpp_verify_expect_contains`.
+
+Requests are sent from the Ansible controller to
+`http://<host default IPv4>:<llama_cpp_port>`, so that address must be
+reachable from the controller; enable the check only where the network allows
+it. `llama_cpp_api_key` is used automatically and is never logged (`no_log`).
+
 ## Example
 
 ```yaml

@@ -1,0 +1,104 @@
+---
+# Optional post-deploy verification (vllm_verify_enabled): issue real API
+# requests against the running server and assert meaningful responses.
+# The Compose healthcheck only proves /health responds; these checks prove
+# the model is actually served and generates (e.g. it would have caught a
+# server started without --enable-auto-tool-choice for tool_choice users).
+- name: Resolve verification base URL
+  ansible.builtin.set_fact:
+    vllm_verify_base_url: "http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}"
+
+- name: Resolve verification target model id
+  ansible.builtin.set_fact:
+    vllm_verify_model_id: "{{ vllm_served_model_name if vllm_served_model_name else vllm_model_name }}"
+
+- name: Prepare verification API headers
+  ansible.builtin.set_fact:
+    vllm_verify_headers: >-
+      {{ {'Authorization': 'Bearer ' ~ (vllm_api_key | string)}
+         if (vllm_api_key | default('', true) | string | length > 0) else {} }}
+  no_log: true
+
+- name: Request served models for verification
+  ansible.builtin.uri:
+    url: "{{ vllm_verify_base_url }}/v1/models"
+    headers: "{{ vllm_verify_headers }}"
+    return_content: true
+    timeout: "{{ vllm_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: vllm_verify_models
+
+- name: Verify served models response
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_models.status == 200
+      - (vllm_verify_models.json | default({}, true)).data | default([]) | length > 0
+      - vllm_verify_model_id in ((vllm_verify_models.json | default({}, true)).data | default([])) | map(attribute='id') | list
+    fail_msg: >-
+      Models verification failed for {{ vllm_verify_base_url }}/v1/models:
+      expected model '{{ vllm_verify_model_id }}' to be served.
+      HTTP status: {{ vllm_verify_models.status | default('n/a') }};
+      served models: {{ (vllm_verify_models.json | default({}, true)).data | default([]) | map(attribute='id') | list }};
+      detail: {{ vllm_verify_models.msg | default('') | truncate(300) }};
+      body: {{ vllm_verify_models.content | default('') | truncate(300) }}
+    success_msg: "Model '{{ vllm_verify_model_id }}' is served on {{ vllm_verify_base_url }}"
+
+- name: Request verification chat completion
+  ansible.builtin.uri:
+    url: "{{ vllm_verify_base_url }}/v1/chat/completions"
+    method: POST
+    headers: "{{ vllm_verify_headers }}"
+    body_format: json
+    body:
+      model: "{{ vllm_verify_model_id }}"
+      messages:
+        - role: user
+          content: "{{ vllm_verify_prompt }}"
+      max_tokens: "{{ vllm_verify_max_tokens | int }}"
+      temperature: "{{ vllm_verify_temperature }}"
+    return_content: true
+    timeout: "{{ vllm_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: vllm_verify_completion
+
+- name: Verify chat completion HTTP response
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_completion.status == 200
+      - vllm_verify_completion.json is defined
+    fail_msg: >-
+      Chat completion verification failed for {{ vllm_verify_base_url }}/v1/chat/completions.
+      HTTP status: {{ vllm_verify_completion.status | default('n/a') }};
+      detail: {{ vllm_verify_completion.msg | default('') | truncate(300) }};
+      body: {{ vllm_verify_completion.content | default('') | truncate(300) }}
+
+- name: Extract verification completion content
+  ansible.builtin.set_fact:
+    vllm_verify_content: "{{ (vllm_verify_completion.json.choices[0].message.content | default('', true)) | trim }}"
+
+- name: Verify chat completion content is not empty
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_content | length > 0
+    fail_msg: >-
+      Chat completion returned empty content for prompt
+      '{{ vllm_verify_prompt }}' (max_tokens={{ vllm_verify_max_tokens }});
+      consider raising vllm_verify_max_tokens or adjusting vllm_verify_prompt.
+      Body: {{ vllm_verify_completion.content | default('') | truncate(300) }}
+
+- name: Verify expected content substring
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_expect_contains | lower in vllm_verify_content | lower
+    fail_msg: >-
+      Expected '{{ vllm_verify_expect_contains }}' in completion content:
+      {{ vllm_verify_content | truncate(300) }}
+  when: vllm_verify_expect_contains | length > 0
+
+- name: Show verification result
+  ansible.builtin.debug:
+    msg: >-
+      Verification OK: model {{ vllm_verify_model_id }} replied:
+      {{ vllm_verify_content | truncate(200) }}

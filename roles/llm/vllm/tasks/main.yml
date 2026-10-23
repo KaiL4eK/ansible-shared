@@ -1,3 +1,4 @@
+---
 - name: Ensure required directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -115,3 +116,7 @@
     msg: |
       vLLM is deployed on http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}
       Docs address http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}/docs
+
+- name: Verify vLLM service with API requests
+  ansible.builtin.import_tasks: verify.yml
+  when: vllm_verify_enabled | bool
