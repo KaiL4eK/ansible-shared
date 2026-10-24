@@ -10,7 +10,9 @@
       - k8s_postgresql_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
       - k8s_postgresql_resources is mapping
       - k8s_postgresql_startup_probe is mapping
-      - k8s_postgresql_resources | length == 0 or k8s_postgresql_resources.keys() | intersect(['requests', 'limits']) | length > 0
+      - >-
+        k8s_postgresql_resources | length == 0 or
+        k8s_postgresql_resources.keys() | intersect(['requests', 'limits']) | length > 0
       - k8s_postgresql_storage_class is string
       - k8s_postgresql_storage_size | length > 0
       - k8s_postgresql_persistence_access_modes is sequence
@@ -19,15 +21,21 @@
       - k8s_postgresql_service_type != 'NodePort' or k8s_postgresql_node_port | int > 0
       - k8s_postgresql_metrics_enabled | type_debug == 'bool'
       - k8s_postgresql_metrics_image_values is mapping
-      - k8s_postgresql_metrics_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
+      - >-
+        k8s_postgresql_metrics_resources_preset in
+        ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
       - k8s_postgresql_metrics_resources is mapping
-      - k8s_postgresql_metrics_resources | length == 0 or k8s_postgresql_metrics_resources.keys() | intersect(['requests', 'limits']) | length > 0
+      - >-
+        k8s_postgresql_metrics_resources | length == 0 or
+        k8s_postgresql_metrics_resources.keys() | intersect(['requests', 'limits']) | length > 0
       - k8s_postgresql_metrics_service_monitor_enabled | type_debug == 'bool'
       - k8s_postgresql_metrics_service_monitor_labels is mapping
       - k8s_postgresql_extended_conf is mapping
       - k8s_postgresql_shared_preload_libraries is string
       - k8s_postgresql_extensions is sequence
-      - k8s_postgresql_extensions | select('match', '^[a-z_][a-z0-9_]*$') | list | length == k8s_postgresql_extensions | length
+      - >-
+        k8s_postgresql_extensions | select('match', '^[a-z_][a-z0-9_]*$') | list | length ==
+        k8s_postgresql_extensions | length
     fail_msg: >-
       PostgreSQL requires a namespace, fixed chart version, admin password,
       persistent storage settings and a valid service configuration.
@@ -86,7 +94,9 @@
       metrics:
         enabled: "{{ k8s_postgresql_metrics_enabled | bool }}"
         image: "{{ k8s_postgresql_metrics_image_values }}"
-        resourcesPreset: "{{ 'none' if (k8s_postgresql_metrics_resources | length > 0) else k8s_postgresql_metrics_resources_preset }}"
+        resourcesPreset: >-
+          {{ 'none' if (k8s_postgresql_metrics_resources | length > 0)
+             else k8s_postgresql_metrics_resources_preset }}
         resources: "{{ k8s_postgresql_metrics_resources }}"
         serviceMonitor:
           enabled: "{{ k8s_postgresql_metrics_service_monitor_enabled | bool }}"
