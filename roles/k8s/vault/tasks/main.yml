@@ -8,6 +8,12 @@
       - k8s_vault_image_tag not in ['', 'latest', 'stable', 'main']
       - not k8s_vault_ingress_enabled or k8s_vault_ingress_host | length > 0
       - not k8s_vault_atomic or k8s_vault_wait
+      - not k8s_vault_unseal_enabled or k8s_vault_unseal_secret_name | length > 0
+      - not k8s_vault_unseal_enabled or k8s_vault_kubeconfig | length > 0
+      - k8s_vault_unseal_key_shares | int >= 1
+      - k8s_vault_unseal_key_threshold | int >= 1
+      - k8s_vault_unseal_key_threshold | int <= k8s_vault_unseal_key_shares | int
+      - k8s_vault_unseal_poll_seconds | int >= 1
 
 - name: Проверить подключение PostgreSQL
   ansible.builtin.assert:
@@ -50,6 +56,34 @@
   no_log: true
   diff: false
 
+- name: Проверить наличие Secret с ключами распечатки
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_vault_namespace }}"
+    name: "{{ k8s_vault_unseal_secret_name }}"
+  register: k8s_vault_unseal_secret_precheck
+  when: k8s_vault_unseal_enabled
+
+# StatefulSet монтирует Secret как volume: без него pod зависает в
+# ContainerCreating (FailedMount), а init выполняется только после запуска.
+# Пустой Secret монтируется как пустой каталог; ключи появятся после init.
+- name: Создать пустой Secret для ключей распечатки до деплоя
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ k8s_vault_unseal_secret_name }}"
+        namespace: "{{ k8s_vault_namespace }}"
+      type: Opaque
+  when:
+    - k8s_vault_unseal_enabled
+    - k8s_vault_unseal_secret_precheck.resources | default([]) | length == 0
+  no_log: true
+  diff: false
+
 - name: Подключить официальный репозиторий HashiCorp
   kubernetes.core.helm_repository:
     name: hashicorp
@@ -70,3 +104,231 @@
     wait: "{{ k8s_vault_wait }}"
     timeout: "{{ k8s_vault_timeout }}"
     values: "{{ lookup('ansible.builtin.template', 'values.yml.j2') | from_yaml }}"
+
+- name: Автоматически инициализировать и распечатать Vault
+  when: k8s_vault_unseal_enabled
+  block:
+    - name: Дождаться запуска pod сервера Vault
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ k8s_vault_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/name=vault
+          - "app.kubernetes.io/instance={{ k8s_vault_release_name }}"
+          - component=server
+      register: k8s_vault_pods
+      until: >-
+        k8s_vault_pods.resources
+        | selectattr('status.phase', 'equalto', 'Running') | list | length > 0
+      retries: 60
+      delay: 5
+
+    - name: Определить pod сервера Vault
+      ansible.builtin.set_fact:
+        k8s_vault_pod_name: >-
+          {{ k8s_vault_pods.resources
+             | selectattr('status.phase', 'equalto', 'Running')
+             | map(attribute='metadata.name') | first }}
+
+    # vault status возвращает rc=2 для sealed/uninitialized, поэтому assert
+    # строится на флагах вывода, а не на коде возврата. Статус не содержит
+    # секретов, задача без no_log для диагностики. kubectl exec вместо
+    # k8s_exec: у python-клиента kubernetes (websocket exec) известны
+    # зависания и ошибки стрима.
+    - name: Определить состояние инициализации Vault
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv
+          + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
+             '-c', 'unsealer', '--', 'vault', 'status', '-format=json'] }}"
+      register: k8s_vault_status_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Извлечь состояние Vault без секретных данных
+      ansible.builtin.set_fact:
+        k8s_vault_state:
+          initialized: >-
+            {{ (((k8s_vault_status_raw.stdout | default('')) or '{}') | from_json).initialized
+               | default(false) | bool }}
+          sealed: >-
+            {{ (((k8s_vault_status_raw.stdout | default('')) or '{}') | from_json).sealed
+               | default(true) | bool }}
+      no_log: true
+
+    - name: Проверить доступность Vault для exec
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_status_raw.rc | default(-1) | int in [0, 2]
+        fail_msg: >-
+          Не удалось выполнить vault status в pod {{ k8s_vault_pod_name }}
+          (rc={{ k8s_vault_status_raw.rc | default(-1) }}):
+          {{ k8s_vault_status_raw.stderr | default('') | trim }}.
+          Проверьте право create pods/exec в namespace vault у kubeconfig
+          деплоя и состояние контейнера unsealer.
+
+    # Валидные комбинации: (false,true) — не инициализирован, (true,true) —
+    # инициализирован и запечатан, (true,false) — распечатан.
+    - name: Проверить корректность состояния Vault
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_state.initialized or not k8s_vault_state.sealed
+        fail_msg: >-
+          Не удалось разобрать состояние Vault (initialized=false,
+          sealed=false); проверьте вывод vault status в pod
+          {{ k8s_vault_pod_name }}.
+
+    # Ветки ниже взаимоисключающие: init выполняется один раз, затем либо
+    # немедленная распечатка, либо распечатка существующими ключами из Secret.
+    - name: Инициализировать Vault
+      when: not k8s_vault_state.initialized
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv
+          + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
+             '-c', 'unsealer', '--', 'vault', 'operator', 'init',
+             '-key-shares=' + (k8s_vault_unseal_key_shares | string),
+             '-key-threshold=' + (k8s_vault_unseal_key_threshold | string),
+             '-format=json'] }}"
+      register: k8s_vault_init_raw
+      changed_when: true
+      no_log: true
+
+    - name: Разобрать результат инициализации
+      when: not k8s_vault_state.initialized
+      ansible.builtin.set_fact:
+        k8s_vault_init_data:
+          keys: "{{ (k8s_vault_init_raw.stdout | from_json).keys }}"
+          root_token: "{{ (k8s_vault_init_raw.stdout | from_json).root_token }}"
+      no_log: true
+
+    - name: Сформировать содержимое Secret с unseal ключами
+      when: not k8s_vault_state.initialized
+      ansible.builtin.set_fact:
+        k8s_vault_unseal_secret_data: >-
+          {{ k8s_vault_unseal_secret_data | default({})
+             | combine({'unseal-key-' + (item | string):
+                        k8s_vault_init_data.keys[item | int] | b64encode}) }}
+      loop: "{{ range(k8s_vault_unseal_key_shares | int) | list }}"
+      no_log: true
+
+    - name: Дополнить содержимое Secret root token
+      when: not k8s_vault_state.initialized
+      ansible.builtin.set_fact:
+        k8s_vault_unseal_secret_data: >-
+          {{ k8s_vault_unseal_secret_data
+             | combine({'root-token': k8s_vault_init_data.root_token | b64encode}) }}
+      no_log: true
+
+    - name: Сохранить unseal ключи и root token в Secret
+      when: not k8s_vault_state.initialized
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ k8s_vault_unseal_secret_name }}"
+            namespace: "{{ k8s_vault_namespace }}"
+          type: Opaque
+          data: "{{ k8s_vault_unseal_secret_data }}"
+      no_log: true
+      diff: false
+
+    # Лишние доли после порога возвращают ошибку; корректность подтверждает
+    # итоговая проверка состояния.
+    - name: Распечатать Vault ключом после инициализации
+      when: not k8s_vault_state.initialized
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv
+          + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
+             '-c', 'unsealer', '--', 'vault', 'operator', 'unseal',
+             k8s_vault_init_data.keys[0]] }}"
+      failed_when: false
+      changed_when: true
+      no_log: true
+
+    - name: Прочитать unseal ключи из Secret
+      when:
+        - k8s_vault_state.initialized
+        - k8s_vault_state.sealed
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ k8s_vault_namespace }}"
+        name: "{{ k8s_vault_unseal_secret_name }}"
+      register: k8s_vault_unseal_secret
+      no_log: true
+
+    - name: Проверить наличие unseal ключей в Secret
+      when:
+        - k8s_vault_state.initialized
+        - k8s_vault_state.sealed
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_unseal_secret.resources | default([]) | length > 0
+          - k8s_vault_unseal_secret.resources[0].data | default({})
+            | dict2items | selectattr('key', 'match', '^unseal-key-')
+            | list | length >= k8s_vault_unseal_key_threshold | int
+        fail_msg: >-
+          Vault запечатан, но в Secret {{ k8s_vault_unseal_secret_name }}
+          отсутствуют unseal ключи. Создайте Secret с ключами ранее
+          выполненного init (ключи unseal-key-N, base64) и повторите плейбук.
+
+    - name: Извлечь unseal ключи для распечатки
+      when:
+        - k8s_vault_state.initialized
+        - k8s_vault_state.sealed
+      ansible.builtin.set_fact:
+        k8s_vault_imported_keys: >-
+          {{ k8s_vault_unseal_secret.resources[0].data | dict2items
+             | selectattr('key', 'match', '^unseal-key-')
+             | map(attribute='value') | map('b64decode') | list }}
+      no_log: true
+
+    - name: Распечатать Vault ключами из Secret
+      when:
+        - k8s_vault_state.initialized
+        - k8s_vault_state.sealed
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv
+          + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
+             '-c', 'unsealer', '--', 'vault', 'operator', 'unseal', item] }}"
+      loop: "{{ k8s_vault_imported_keys }}"
+      failed_when: false
+      changed_when: true
+      no_log: true
+
+    - name: Проверить итоговое состояние Vault
+      when: not k8s_vault_state.initialized or k8s_vault_state.sealed
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv
+          + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
+             '-c', 'unsealer', '--', 'vault', 'status', '-format=json'] }}"
+      register: k8s_vault_final_status_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Извлечь итоговое состояние без секретных данных
+      when: not k8s_vault_state.initialized or k8s_vault_state.sealed
+      ansible.builtin.set_fact:
+        k8s_vault_final_state:
+          initialized: >-
+            {{ (((k8s_vault_final_status_raw.stdout | default('')) or '{}') | from_json).initialized
+               | default(false) | bool }}
+          sealed: >-
+            {{ (((k8s_vault_final_status_raw.stdout | default('')) or '{}') | from_json).sealed
+               | default(true) | bool }}
+      no_log: true
+
+    - name: Подтвердить распечатку Vault
+      when: not k8s_vault_state.initialized or k8s_vault_state.sealed
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_final_status_raw.rc | default(-1) | int in [0, 2]
+          - k8s_vault_final_state.initialized
+          - not k8s_vault_final_state.sealed
+        fail_msg: >-
+          Vault в pod {{ k8s_vault_pod_name }} не распечатан
+          (rc={{ k8s_vault_final_status_raw.rc | default(-1) }}):
+          {{ k8s_vault_final_status_raw.stderr | default('') | trim }}.
+          Проверьте логи контейнеров vault и unsealer.

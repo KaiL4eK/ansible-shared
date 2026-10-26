@@ -1,0 +1,177 @@
+---
+- name: Validate PostgreSQL schema Job inputs
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - k8s_postgresql_schema_namespace | length > 0
+      - k8s_postgresql_schema_job_name is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+      - k8s_postgresql_schema_job_name | length <= 34
+      - "':' in k8s_postgresql_schema_image"
+      - k8s_postgresql_schema_image.split(':')[-1] not in ['latest', 'stable', 'main']
+      - k8s_postgresql_schema_host | length > 0
+      - k8s_postgresql_schema_port | int in range(1, 65536)
+      - k8s_postgresql_schema_database | length > 0
+      - k8s_postgresql_schema_user | length > 0
+      - k8s_postgresql_schema_password | length > 0
+      - k8s_postgresql_schema_statements is sequence
+      - k8s_postgresql_schema_statements is not string
+      - k8s_postgresql_schema_statements | length > 0
+    fail_msg: >-
+      Provide target database parameters and a non-empty list of SQL statements;
+      check mode is not supported.
+  no_log: true
+
+- name: Check the explicitly selected kubeconfig without reading it
+  ansible.builtin.stat:
+    path: "{{ k8s_postgresql_schema_kubeconfig }}"
+    get_checksum: false
+    get_mime: false
+  register: k8s_postgresql_schema_kubeconfig_info
+  when: k8s_postgresql_schema_kubeconfig | length > 0
+
+- name: Validate the explicitly selected kubeconfig exists
+  ansible.builtin.assert:
+    that:
+      - k8s_postgresql_schema_kubeconfig_info.stat.isreg | default(false)
+  when: k8s_postgresql_schema_kubeconfig | length > 0
+
+- name: Check the target namespace exists
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ k8s_postgresql_schema_namespace }}"
+  register: k8s_postgresql_schema_namespace_info
+
+- name: Require an existing target namespace
+  ansible.builtin.assert:
+    that:
+      - k8s_postgresql_schema_namespace_info.resources | length == 1
+    fail_msg: Create the target namespace before applying the schema.
+
+- name: Apply PostgreSQL schema with a temporary credential Secret
+  block:
+    - name: Create a uniquely named temporary schema credentials Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            generateName: "{{ k8s_postgresql_schema_job_name }}-"
+            namespace: "{{ k8s_postgresql_schema_namespace }}"
+            labels:
+              app.kubernetes.io/name: postgresql-schema
+              app.kubernetes.io/managed-by: ansible
+          type: Opaque
+          stringData:
+            APP_USERNAME: "{{ k8s_postgresql_schema_user }}"
+            APP_PASSWORD: "{{ k8s_postgresql_schema_password }}"
+      register: k8s_postgresql_schema_credentials_secret
+      no_log: true
+      diff: false
+
+    - name: Apply the schema with a short-lived Job
+      kubernetes.core.k8s:
+        state: present
+        force: true
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+            namespace: "{{ k8s_postgresql_schema_namespace }}"
+            labels:
+              app.kubernetes.io/name: postgresql-schema
+              app.kubernetes.io/managed-by: ansible
+          spec:
+            backoffLimit: 1
+            activeDeadlineSeconds: 300
+            ttlSecondsAfterFinished: 600
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: postgresql-schema
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                containers:
+                  - name: schema
+                    image: "{{ k8s_postgresql_schema_image }}"
+                    imagePullPolicy: IfNotPresent
+                    command: [/bin/sh, -ec]
+                    args:
+                      - |
+                        psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
+                        {{ k8s_postgresql_schema_statements
+                           | map('trim') | select('!=', '')
+                           | map('regex_replace', ';+$', '') | join(';') }};
+                        SQL
+                    env:
+                      - name: PGHOST
+                        value: "{{ k8s_postgresql_schema_host }}"
+                      - name: PGPORT
+                        value: "{{ k8s_postgresql_schema_port | string }}"
+                      - name: PGDATABASE
+                        value: "{{ k8s_postgresql_schema_database }}"
+                      - name: PGSSLMODE
+                        value: "{{ k8s_postgresql_schema_sslmode }}"
+                      - name: PGUSER
+                        valueFrom:
+                          secretKeyRef:
+                            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+                            key: APP_USERNAME
+                      - name: PGPASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+                            key: APP_PASSWORD
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 32Mi
+                      limits:
+                        cpu: 250m
+                        memory: 128Mi
+      diff: false
+
+    - name: Wait until the PostgreSQL schema Job completes or fails
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: "{{ k8s_postgresql_schema_namespace }}"
+        name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+      register: k8s_postgresql_schema_job_status
+      until:
+        - k8s_postgresql_schema_job_status.resources | length == 1
+        - >-
+          (k8s_postgresql_schema_job_status.resources[0].status.conditions | default([]) |
+          selectattr('type', 'equalto', 'Complete') | selectattr('status', 'equalto', 'True') | list | length > 0) or
+          (k8s_postgresql_schema_job_status.resources[0].status.conditions | default([]) |
+          selectattr('type', 'equalto', 'Failed') | selectattr('status', 'equalto', 'True') | list | length > 0)
+      retries: "{{ (k8s_postgresql_schema_timeout | int // 5) + 1 }}"
+      delay: 5
+
+    - name: Verify the PostgreSQL schema Job completed successfully
+      ansible.builtin.assert:
+        that:
+          - k8s_postgresql_schema_job_status.resources | length == 1
+          - >-
+            k8s_postgresql_schema_job_status.resources[0].status.conditions | default([]) |
+            selectattr('type', 'equalto', 'Complete') | selectattr('status', 'equalto', 'True') | list | length > 0
+        fail_msg: PostgreSQL schema Job failed; inspect its pod logs in the target namespace.
+
+  always:
+    - name: Remove the temporary schema credentials Secret
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        namespace: "{{ k8s_postgresql_schema_namespace }}"
+        name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+      when:
+        - k8s_postgresql_schema_credentials_secret is defined
+        - k8s_postgresql_schema_credentials_secret.result is defined
+        - k8s_postgresql_schema_credentials_secret.result.metadata is defined
+        - k8s_postgresql_schema_credentials_secret.result.metadata.name is defined
+      no_log: true
+      diff: false

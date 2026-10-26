@@ -37,6 +37,39 @@ server:
     - envName: VAULT_PG_CONNECTION_URL
       secretName: {{ k8s_vault_pg_secret_name | to_json }}
       secretKey: connection-url
+{% if k8s_vault_unseal_enabled %}
+  volumes:
+    - name: unseal-keys
+      secret:
+        secretName: {{ k8s_vault_unseal_secret_name | to_json }}
+  extraContainers:
+    - name: unsealer
+      image: {{ (k8s_vault_image_repository ~ ':' ~ k8s_vault_image_tag) | to_json }}
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: VAULT_ADDR
+          value: http://127.0.0.1:8200
+        - name: VAULT_UNSEAL_DIR
+          value: /vault/unseal
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          while true; do
+            if ! vault status >/dev/null 2>&1; then
+              for key_file in "$VAULT_UNSEAL_DIR"/unseal-key-*; do
+                [ -s "$key_file" ] || continue
+                vault operator unseal "$(cat "$key_file")" >/dev/null 2>&1 || true
+              done
+            fi
+            sleep {{ k8s_vault_unseal_poll_seconds }}
+          done
+      volumeMounts:
+        - name: unseal-keys
+          mountPath: /vault/unseal
+          readOnly: true
+      resources: {{ k8s_vault_unseal_sidecar_resources | to_json }}
+{% endif %}
   readinessProbe:
     enabled: true
     path: /v1/sys/health?standbyok=true

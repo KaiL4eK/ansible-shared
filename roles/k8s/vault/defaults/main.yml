@@ -19,7 +19,31 @@ k8s_vault_resources:
   limits:
     cpu: "1"
     memory: 512Mi
-# Новый сервер не Ready до ручных init/unseal.
+# Pod не Ready до init/unseal; авто-init выполняется задачами роли после Helm.
 k8s_vault_wait: false
 k8s_vault_atomic: false
 k8s_vault_timeout: 10m
+# Автоматическая инициализация и распечатка. При первом запуске роль выполняет
+# `vault operator init` и сохраняет unseal ключи и root token в Secret;
+# sidecar-контейнер в pod распечатывает Vault после любого рестарта.
+k8s_vault_unseal_enabled: false
+k8s_vault_unseal_secret_name: vault-unseal
+k8s_vault_unseal_key_shares: 1
+k8s_vault_unseal_key_threshold: 1
+k8s_vault_unseal_poll_seconds: 5
+# Явный kubeconfig для kubectl exec (авто-init/unseal). Пусто — kubectl
+# использует стандартное окружение (KUBECONFIG/контекст по умолчанию).
+# Принимается путь в любой форме (~, $VARS, относительный): роль нормализует
+# сама, потому что kubectl — Go-бинарь без shell и тильду не раскрывает.
+k8s_vault_kubeconfig: ""
+k8s_vault_kubectl_argv: >-
+  {{ ['kubectl'] if not k8s_vault_kubeconfig
+     else ['kubectl', '--kubeconfig='
+           + (k8s_vault_kubeconfig | expanduser | expandvars | trim | realpath)] }}
+k8s_vault_unseal_sidecar_resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
