@@ -131,6 +131,29 @@
              | selectattr('status.phase', 'equalto', 'Running')
              | map(attribute='metadata.name') | first }}
 
+    # Отсутствующий kubectl command завершается rc=2 (ENOENT) с пустым
+    # stdout/stderr — неотличимо от rc=2 vault status для sealed/
+    # uninitialized, assert ниже его пропустит, а падение случится позже
+    # с запутанной ошибкой уже после Helm. Бинарник проверяем явно до
+    # первого exec.
+    - name: Проверить доступность kubectl для exec
+      ansible.builtin.command:
+        argv: "{{ k8s_vault_kubectl_argv + ['version', '--client'] }}"
+      register: k8s_vault_kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Подтвердить наличие kubectl
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_kubectl_check.rc | default(-1) | int == 0
+        fail_msg: >-
+          kubectl недоступен на контроллере
+          (rc={{ k8s_vault_kubectl_check.rc | default(-1) }},
+          stderr={{ k8s_vault_kubectl_check.stderr | default('') | trim }}).
+          Задачи авто-init/unseal требуют kubectl CLI: установите kubectl
+          или проверьте PATH и kubeconfig {{ k8s_vault_kubeconfig }}.
+
     # vault status возвращает rc=2 для sealed/uninitialized, поэтому assert
     # строится на флагах вывода, а не на коде возврата. Статус не содержит
     # секретов, задача без no_log для диагностики. kubectl exec вместо
@@ -168,15 +191,19 @@
           деплоя и состояние контейнера unsealer.
 
     # Валидные комбинации: (false,true) — не инициализирован, (true,true) —
-    # инициализирован и запечатан, (true,false) — распечатан.
+    # инициализирован и запечатан, (true,false) — распечатан. Отклоняется
+    # только (false,false) — признак мусорного парсинга. Условие
+    # `initialized or not sealed` здесь ошибочно: оно отклоняет валидное
+    # (false,true) — первое состояние деплоя — и пропускает невалидное.
     - name: Проверить корректность состояния Vault
       ansible.builtin.assert:
         that:
-          - k8s_vault_state.initialized or not k8s_vault_state.sealed
+          - k8s_vault_state.initialized or k8s_vault_state.sealed
         fail_msg: >-
-          Не удалось разобрать состояние Vault (initialized=false,
-          sealed=false); проверьте вывод vault status в pod
-          {{ k8s_vault_pod_name }}.
+          Не удалось разобрать состояние Vault
+          (initialized={{ k8s_vault_state.initialized }},
+          sealed={{ k8s_vault_state.sealed }}); проверьте вывод
+          vault status в pod {{ k8s_vault_pod_name }}.
 
     # Ветки ниже взаимоисключающие: init выполняется один раз, затем либо
     # немедленная распечатка, либо распечатка существующими ключами из Secret.
@@ -193,12 +220,27 @@
       changed_when: true
       no_log: true
 
+    # vault operator init -format=json возвращает unseal_keys_b64/
+    # unseal_keys_hex/root_token; поле keys есть только в сыром API-ответе.
+    # В Secret кладём base64-доли: vault operator unseal принимает их как есть.
     - name: Разобрать результат инициализации
       when: not k8s_vault_state.initialized
       ansible.builtin.set_fact:
         k8s_vault_init_data:
-          keys: "{{ (k8s_vault_init_raw.stdout | from_json).keys }}"
+          unseal_keys_b64: "{{ (k8s_vault_init_raw.stdout | from_json).unseal_keys_b64 }}"
           root_token: "{{ (k8s_vault_init_raw.stdout | from_json).root_token }}"
+      no_log: true
+
+    - name: Проверить состав результата инициализации
+      when: not k8s_vault_state.initialized
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_init_data.unseal_keys_b64 | default([]) | length >= k8s_vault_unseal_key_shares | int
+          - k8s_vault_init_data.root_token | default('') | length > 0
+        fail_msg: >-
+          Вывод vault operator init не содержит unseal_keys_b64 и root_token
+          (rc={{ k8s_vault_init_raw.rc | default(-1) }}); проверьте формат
+          вывода CLI Vault {{ k8s_vault_image_tag }}.
       no_log: true
 
     - name: Сформировать содержимое Secret с unseal ключами
@@ -207,7 +249,7 @@
         k8s_vault_unseal_secret_data: >-
           {{ k8s_vault_unseal_secret_data | default({})
              | combine({'unseal-key-' + (item | string):
-                        k8s_vault_init_data.keys[item | int] | b64encode}) }}
+                        k8s_vault_init_data.unseal_keys_b64[item | int] | b64encode}) }}
       loop: "{{ range(k8s_vault_unseal_key_shares | int) | list }}"
       no_log: true
 
@@ -242,7 +284,7 @@
         argv: "{{ k8s_vault_kubectl_argv
           + ['exec', '-n', k8s_vault_namespace, k8s_vault_pod_name,
              '-c', 'unsealer', '--', 'vault', 'operator', 'unseal',
-             k8s_vault_init_data.keys[0]] }}"
+             k8s_vault_init_data.unseal_keys_b64[0]] }}"
       failed_when: false
       changed_when: true
       no_log: true
