@@ -1,0 +1,35 @@
+---
+# Preflight готовых Secret'ов: наличие, ключи и непустые значения проверяет
+# роль, consumer playbook не ждёт секреты и не знает их источник (чарт/VSO).
+# Непустые значения отсекают Secret'ы, синхронизировавшиеся раньше содержимого.
+- name: Wait for the referenced credential Secrets and required keys
+  vars:
+    k8s_postgresql_init_preflight_secrets:
+      - name: "{{ k8s_postgresql_init_admin_secret_name }}"
+        keys: >-
+          {{ [k8s_postgresql_init_admin_secret_key]
+             + ([k8s_postgresql_init_admin_username_key]
+                if k8s_postgresql_init_admin_username_key | length > 0 else []) }}
+      - name: "{{ k8s_postgresql_init_user_secret_name }}"
+        keys:
+          - "{{ k8s_postgresql_init_user_username_key }}"
+          - "{{ k8s_postgresql_init_user_secret_key }}"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_postgresql_init_namespace }}"
+    name: "{{ item.name }}"
+  register: k8s_postgresql_init_preflight
+  loop: "{{ k8s_postgresql_init_preflight_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  retries: "{{ k8s_postgresql_init_secret_preflight_retries | int }}"
+  delay: 5
+  until:
+    - k8s_postgresql_init_preflight.resources | length == 1
+    - >-
+      (k8s_postgresql_init_preflight.resources | first).data | default({})
+      | dict2items | selectattr('key', 'in', item['keys'])
+      | map(attribute='value') | map('b64decode') | reject('equalto', '')
+      | list | length == item['keys'] | length
+  no_log: true

@@ -1,4 +1,8 @@
 ---
+- name: Preflight the referenced ready Secrets
+  ansible.builtin.include_tasks: preflight.yml
+  when: not (k8s_postgresql_init_manage_credentials | bool)
+
 - name: Initialize PostgreSQL with role-managed temporary credentials
   ansible.builtin.include_tasks: credentials.yml
   when: k8s_postgresql_init_manage_credentials | bool

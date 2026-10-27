@@ -13,10 +13,20 @@ k8s_postgresql_schema_password: ""
 # каждое завершается собственным ';'; выражение, питающее следующую
 # meta-команду (\gexec), идёт без ';'. psql meta-команды — отдельные элементы.
 k8s_postgresql_schema_statements: []
-# Дополнительные секретные значения для SQL: список {name: ENV_NAME, value}.
-# Попадают только в stringData временного Secret и в env Job'а через
-# secretKeyRef (имя env == ключу Secret); не отображаются в Job spec и логах.
-# В выражениях читаются psql-метакомандой \getenv (psql >= 15).
+# Дополнительные секретные значения для SQL: список {name: ENV_NAME, value}
+# (inline, через временный Secret) либо {name, secret_name, secret_key}
+# (прямой secretKeyRef в готовый Secret). Ни та, ни другая форма не попадает
+# в Job spec и логи. В выражениях читаются psql-метакомандой \getenv (psql >= 15).
 k8s_postgresql_schema_secret_env: []
+# Режим готовых Secret'ов для идентичности Job'а: PGUSER/PGPASSWORD через
+# secretKeyRef из user_secret_name; username — ключом user_username_key или
+# инлайном user (взаимоисключаемо, как admin-входы k8s/postgresql-init-db).
+# По умолчанию пусто — managed-режим (временный Secret).
+k8s_postgresql_schema_user_secret_name: ""
+k8s_postgresql_schema_user_username_key: ""
+k8s_postgresql_schema_user_secret_key: ""
+# Preflight готовых Secret'ов: ожидание наличия, ключей и непустых значений
+# перед созданием Job'а; 12 ретраев × 5s.
+k8s_postgresql_schema_secret_preflight_retries: 12
 k8s_postgresql_schema_timeout: 330
 k8s_postgresql_schema_kubeconfig: ""

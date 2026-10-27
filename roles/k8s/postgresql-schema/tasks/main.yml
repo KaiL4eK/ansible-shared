@@ -11,13 +11,28 @@
       - k8s_postgresql_schema_host | length > 0
       - k8s_postgresql_schema_port | int in range(1, 65536)
       - k8s_postgresql_schema_database | length > 0
-      - k8s_postgresql_schema_user | length > 0
-      - k8s_postgresql_schema_password | length > 0
+      # Режим идентичности: готовый Secret (user_secret_name + user_secret_key,
+      # username ключом user_username_key или инлайном user — XOR) XOR
+      # managed inline user/password — как admin-входы k8s/postgresql-init-db.
+      - >-
+        ((k8s_postgresql_schema_user_secret_name | length > 0)
+         and (k8s_postgresql_schema_user_secret_key | length > 0)
+         and ((k8s_postgresql_schema_user | length > 0)
+              != (k8s_postgresql_schema_user_username_key | length > 0)))
+        or
+        ((k8s_postgresql_schema_user_secret_name | length == 0)
+         and (k8s_postgresql_schema_user | length > 0)
+         and (k8s_postgresql_schema_password | length > 0))
+      - >-
+        (k8s_postgresql_schema_user_secret_name | length == 0)
+        or (k8s_postgresql_schema_user_secret_name
+            is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'))
       - k8s_postgresql_schema_statements is sequence
       - k8s_postgresql_schema_statements is not string
       - k8s_postgresql_schema_statements | length > 0
-      # secret_env: имена ENV_NAME-формата, значения непустые, без дублей и
-      # коллизий со служебными env Job'а и ключами временного Secret роли.
+      # secret_env: имена ENV_NAME-формата, без дублей и коллизий со служебными
+      # env Job'а; каждая запись — либо inline {name, value}, либо ссылка
+      # {name, secret_name, secret_key} на готовый Secret.
       - k8s_postgresql_schema_secret_env is sequence
       - k8s_postgresql_schema_secret_env is not string
       - >-
@@ -28,17 +43,44 @@
         {{ k8s_postgresql_schema_secret_env | map(attribute='name') | list
            | unique | length == k8s_postgresql_schema_secret_env | length }}
       - >-
-        {{ k8s_postgresql_schema_secret_env | map(attribute='value')
+        {{ k8s_postgresql_schema_secret_env
+           | selectattr('secret_name', 'defined') | selectattr('value', 'defined')
+           | list | length == 0 }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env
+           | selectattr('secret_name', 'defined')
+           | selectattr('secret_key', 'defined') | list | length
+           == k8s_postgresql_schema_secret_env
+              | selectattr('secret_name', 'defined') | list | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env
+           | selectattr('secret_name', 'defined')
+           | map(attribute='secret_name')
+           | select('match', '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') | list | length
+           == k8s_postgresql_schema_secret_env
+              | selectattr('secret_name', 'defined') | list | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env
+           | selectattr('secret_name', 'defined')
+           | map(attribute='secret_key') | select('!=', '') | list | length
+           == k8s_postgresql_schema_secret_env
+              | selectattr('secret_name', 'defined') | list | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env
+           | rejectattr('secret_name', 'defined')
+           | selectattr('value', 'defined') | map(attribute='value')
            | select('!=', '') | list | length
-           == k8s_postgresql_schema_secret_env | length }}
+           == k8s_postgresql_schema_secret_env
+              | rejectattr('secret_name', 'defined') | list | length }}
       - >-
         {{ k8s_postgresql_schema_secret_env | map(attribute='name')
            | intersect(['PGHOST', 'PGPORT', 'PGDATABASE', 'PGSSLMODE',
                         'PGUSER', 'PGPASSWORD', 'APP_USERNAME', 'APP_PASSWORD'])
            | length == 0 }}
     fail_msg: >-
-      Provide target database parameters, a non-empty list of SQL statements
-      and well-formed secret_env entries; check mode is not supported.
+      Provide target database parameters, either inline credentials or a ready
+      identity Secret, a non-empty list of SQL statements and well-formed
+      secret_env entries; check mode is not supported.
   no_log: true
 
 - name: Check the explicitly selected kubeconfig without reading it
@@ -68,7 +110,67 @@
       - k8s_postgresql_schema_namespace_info.resources | length == 1
     fail_msg: Create the target namespace before applying the schema.
 
-- name: Apply PostgreSQL schema with a temporary credential Secret
+- name: Resolve the identity mode and unique schema Job name for this run
+  ansible.builtin.set_fact:
+    # Managed-режим: идентичность и inline secret_env через временный Secret.
+    # Режим готовых Secret'ов без inline-значений: временный Secret не
+    # создаётся вовсе, Job получает собственное уникальное имя.
+    k8s_postgresql_schema_temp_secret_needed: >-
+      {{ (k8s_postgresql_schema_user_secret_name | length == 0)
+         or (k8s_postgresql_schema_secret_env
+             | selectattr('value', 'defined') | list | length > 0) }}
+    k8s_postgresql_schema_run_job_name: >-
+      {{ k8s_postgresql_schema_job_name }}-{{ now(utc=true, fmt='%H%M%S%f') }}
+
+- name: Wait for the identity credential Secret and required keys
+  vars:
+    k8s_postgresql_schema_identity_keys: >-
+      {{ [k8s_postgresql_schema_user_secret_key]
+         + ([k8s_postgresql_schema_user_username_key]
+            if k8s_postgresql_schema_user_username_key | length > 0 else []) }}
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_postgresql_schema_namespace }}"
+    name: "{{ k8s_postgresql_schema_user_secret_name }}"
+  register: k8s_postgresql_schema_identity_preflight
+  until:
+    - k8s_postgresql_schema_identity_preflight.resources | length == 1
+    - >-
+      (k8s_postgresql_schema_identity_preflight.resources | first).data | default({})
+      | dict2items | selectattr('key', 'in', k8s_postgresql_schema_identity_keys)
+      | map(attribute='value') | map('b64decode') | reject('equalto', '')
+      | list | length == k8s_postgresql_schema_identity_keys | length
+  retries: "{{ k8s_postgresql_schema_secret_preflight_retries | int }}"
+  delay: 5
+  when: k8s_postgresql_schema_user_secret_name | length > 0
+  no_log: true
+
+- name: Wait for the referenced secret_env Secrets and required keys
+  vars:
+    k8s_postgresql_schema_ref_entries: >-
+      {{ k8s_postgresql_schema_secret_env | selectattr('secret_name', 'defined') | list }}
+  loop: "{{ k8s_postgresql_schema_ref_entries }}"
+  loop_control:
+    label: "{{ item.secret_name }}/{{ item.secret_key }}"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_postgresql_schema_namespace }}"
+    name: "{{ item.secret_name }}"
+  register: k8s_postgresql_schema_ref_preflight
+  retries: "{{ k8s_postgresql_schema_secret_preflight_retries | int }}"
+  delay: 5
+  until:
+    - k8s_postgresql_schema_ref_preflight.resources | length == 1
+    - >-
+      (k8s_postgresql_schema_ref_preflight.resources | first).data | default({})
+      | dict2items | selectattr('key', 'in', [item.secret_key])
+      | map(attribute='value') | map('b64decode') | reject('equalto', '')
+      | list | length == 1
+  no_log: true
+
+- name: Apply PostgreSQL schema
   block:
     - name: Create a uniquely named temporary schema credentials Secret
       kubernetes.core.k8s:
@@ -87,10 +189,29 @@
             {{ {'APP_USERNAME': k8s_postgresql_schema_user,
                 'APP_PASSWORD': k8s_postgresql_schema_password}
                | combine(k8s_postgresql_schema_secret_env
+                         | selectattr('value', 'defined')
                          | ansible.builtin.items2dict(key_name='name', value_name='value')) }}
       register: k8s_postgresql_schema_credentials_secret
+      when: k8s_postgresql_schema_temp_secret_needed | bool
       no_log: true
       diff: false
+
+    - name: Compose the secret-backed environment entries for the schema Job
+      ansible.builtin.set_fact:
+        k8s_postgresql_schema_env_extra: "{{ k8s_postgresql_schema_env_extra | default([]) + [item_env] }}"
+      vars:
+        # Inline-записи идут через временный Secret, ссылки — прямым
+        # secretKeyRef в готовый Secret (образец combine — k8s/postgresql-init-db).
+        item_env: >-
+          {{ {'name': item.name}
+             | combine({'value': item.value}
+                       if item.value is defined
+                       else {'valueFrom': {'secretKeyRef':
+                                           {'name': item.secret_name,
+                                            'key': item.secret_key}}}) }}
+      loop: "{{ k8s_postgresql_schema_secret_env }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Apply the schema with a short-lived Job
       vars:
@@ -104,24 +225,37 @@
           {{ k8s_postgresql_schema_statements
              | map('trim') | select('!=', '')
              | join(k8s_postgresql_schema_newline) }}
-        # Env Job'а собирается структурой данных: secret_env-записи не
-        # выражаются статическим YAML (образец — k8s/postgresql-init-db).
-        # Имя временного Secret подставляется в secretKeyRef каждой записи.
+        # Идентичность Job'а: managed — из временного Secret (APP_*), режим
+        # готовых Secret'ов — из user_secret_name; инлайн username разрешён
+        # только в secret-режиме (образец — admin-входы postgresql-init-db),
+        # пароль всегда только через secretKeyRef.
+        k8s_postgresql_schema_pguser: >-
+          {{ {'value': k8s_postgresql_schema_user}
+             if (k8s_postgresql_schema_user_secret_name | length > 0
+                 and k8s_postgresql_schema_user | length > 0)
+             else {'valueFrom': {'secretKeyRef':
+                                 {'name': (k8s_postgresql_schema_user_secret_name
+                                           if k8s_postgresql_schema_user_secret_name | length > 0
+                                           else k8s_postgresql_schema_credentials_secret.result.metadata.name),
+                                  'key': (k8s_postgresql_schema_user_username_key
+                                          if k8s_postgresql_schema_user_secret_name | length > 0
+                                          else 'APP_USERNAME')}}} }}
+        k8s_postgresql_schema_pgpassword: >-
+          {{ {'valueFrom': {'secretKeyRef':
+                            {'name': (k8s_postgresql_schema_user_secret_name
+                                      if k8s_postgresql_schema_user_secret_name | length > 0
+                                      else k8s_postgresql_schema_credentials_secret.result.metadata.name),
+                             'key': (k8s_postgresql_schema_user_secret_key
+                                     if k8s_postgresql_schema_user_secret_name | length > 0
+                                     else 'APP_PASSWORD')}}} }}
         k8s_postgresql_schema_env: >-
           {{ [{'name': 'PGHOST', 'value': k8s_postgresql_schema_host},
               {'name': 'PGPORT', 'value': k8s_postgresql_schema_port | string},
               {'name': 'PGDATABASE', 'value': k8s_postgresql_schema_database},
-              {'name': 'PGSSLMODE', 'value': k8s_postgresql_schema_sslmode},
-              {'name': 'PGUSER',
-               'valueFrom': {'secretKeyRef': {'name': k8s_postgresql_schema_credentials_secret.result.metadata.name, 'key': 'APP_USERNAME'}}},
-              {'name': 'PGPASSWORD',
-               'valueFrom': {'secretKeyRef': {'name': k8s_postgresql_schema_credentials_secret.result.metadata.name, 'key': 'APP_PASSWORD'}}}]
-             + (k8s_postgresql_schema_secret_env | map(attribute='name')
-                | map('regex_replace', '^(.+)$',
-                      '{"name": "\1", "valueFrom": {"secretKeyRef": {"name": "'
-                      ~ k8s_postgresql_schema_credentials_secret.result.metadata.name
-                      ~ '", "key": "\1"}}}')
-                | map('ansible.builtin.from_json') | list) }}
+              {'name': 'PGSSLMODE', 'value': k8s_postgresql_schema_sslmode}]
+             + [{'name': 'PGUSER'} | combine(k8s_postgresql_schema_pguser)]
+             + [{'name': 'PGPASSWORD'} | combine(k8s_postgresql_schema_pgpassword)]
+             + k8s_postgresql_schema_env_extra }}
       kubernetes.core.k8s:
         state: present
         force: true
@@ -129,7 +263,7 @@
           apiVersion: batch/v1
           kind: Job
           metadata:
-            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+            name: "{{ k8s_postgresql_schema_run_job_name }}"
             namespace: "{{ k8s_postgresql_schema_namespace }}"
             labels:
               app.kubernetes.io/name: postgresql-schema
@@ -170,7 +304,7 @@
         api_version: batch/v1
         kind: Job
         namespace: "{{ k8s_postgresql_schema_namespace }}"
-        name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
+        name: "{{ k8s_postgresql_schema_run_job_name }}"
       register: k8s_postgresql_schema_job_status
       until:
         - k8s_postgresql_schema_job_status.resources | length == 1
@@ -200,6 +334,7 @@
         namespace: "{{ k8s_postgresql_schema_namespace }}"
         name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
       when:
+        - k8s_postgresql_schema_temp_secret_needed | bool
         - k8s_postgresql_schema_credentials_secret is defined
         - k8s_postgresql_schema_credentials_secret.result is defined
         - k8s_postgresql_schema_credentials_secret.result.metadata is defined

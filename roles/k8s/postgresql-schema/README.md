@@ -6,30 +6,36 @@ Kubernetes Job. PostgreSQL server не устанавливается: Job по�
 официальный `postgres:17.6-bookworm`.
 
 Все параметры объявлены в `defaults/main.yml`, префикс `k8s_postgresql_schema_`.
-Поддерживается только режим управляемых credentials: плейбук передаёт
-`k8s_postgresql_schema_user` и `k8s_postgresql_schema_password` из своего Vault,
-роль сама проверяет входы и существование namespace, создаёт уникальный
-временный Secret и Job, ждёт результат и удаляет Secret в `always`, в том числе
-при ошибке. `k8s_postgresql_schema_job_name` служит префиксом (до 34 символов);
-фактические имена Secret и Job генерируются сервером и уникальны для каждого
-запуска. Check mode отклоняется. Namespace должен существовать заранее.
-Необязательный `k8s_postgresql_schema_kubeconfig` позволяет проверить наличие
-явно выбранного файла без чтения; подключение использует стандартные
-`K8S_AUTH_*`.
+Идентичность Job'а — в одном из двух режимов: managed (по умолчанию) с inline
+`user`/`password` через уникальный временный Secret, либо режим готовых
+Secret'ов — `user_secret_name` + `user_secret_key`, username ключом
+`user_username_key` или инлайном `user` (XOR, как admin-входы
+`k8/postgresql-init-db`); в этом режиме пароль всегда через `secretKeyRef`,
+а временный Secret не создаётся, если нет inline-значений в `secret_env`.
+Роль сама делает preflight переданных готовых Secret'ов: ожидает наличие,
+ключи и непустые значения (`k8s_postgresql_schema_secret_preflight_retries`,
+12 × 5s) — consumer playbook не ждёт секреты и не знает их источник.
+Проверяется существование namespace; check mode отклоняется.
+`k8s_postgresql_schema_job_name` служит префиксом (до 34 символов);
+уникальность имени конкретного запуска Job'а обеспечивает суффикс с меткой
+времени. Необязательный `k8s_postgresql_schema_kubeconfig` позволяет
+проверить наличие явно выбранного файла без чтения; подключение использует
+стандартные `K8S_AUTH_*`.
 
 Пароль Job получает через `secretKeyRef`; значения не попадают в Job spec или
-логи. SQL-выражения передаются списком `k8s_postgresql_schema_statements` и
-склеиваются построчно в один `psql`-скрипт с `ON_ERROR_STOP`; ошибки SQL
-завершают Job с ошибкой. Каждое SQL-выражение потребитель завершает
-собственным `;` (psql исполняет буфер на `;`); выражение, питающее следующую
-meta-команду (`\gexec`), идёт без `;`. Допускаются psql meta-команды
-(`\getenv`, `\gexec`) как отдельные элементы списка; `\getenv` требует
-psql >= 15 (пин образа 17.6 этому удовлетворяет). Выражения не являются
-секретом и видны в Job spec; секретные значения передаются через
-`k8s_postgresql_schema_secret_env` (список `{name: ENV_NAME, value}`):
-роль кладёт их только в stringData временного Secret и подключает env Job'а
-через `secretKeyRef` (имя env = ключу Secret, зарезервированы `PG*` и
-`APP_*`), SQL читает их через `\getenv`.
+логи (исключение — инлайн username в режиме готовых Secret'ов, как
+`k8s_postgresql_init_admin_user` в `k8s/postgresql-init-db`). SQL-выражения
+передаются списком `k8s_postgresql_schema_statements` и склеиваются построчно
+в один `psql`-скрипт с `ON_ERROR_STOP`; ошибки SQL завершают Job с ошибкой.
+Каждое SQL-выражение потребитель завершает собственным `;` (psql исполняет
+буфер на `;`); выражение, питающее следующую meta-команду (`\gexec`), идёт
+без `;`. Допускаются psql meta-команды (`\getenv`, `\gexec`) как отдельные
+элементы списка; `\getenv` требует psql >= 15 (пин образа 17.6 этому
+удовлетворяет). Выражения не являются секретом и видны в Job spec;
+секретные значения передаются через `k8s_postgresql_schema_secret_env`:
+запись `{name: ENV_NAME, value}` идёт через временный Secret, запись
+`{name, secret_name, secret_key}` — прямым `secretKeyRef` в готовый Secret;
+SQL читает их через `\getenv`.
 Для идемпотентных повторных запусков выражения должны использовать
 `CREATE ... IF NOT EXISTS`; расхождения существующей схемы роль не выправляет.
 

@@ -8,6 +8,9 @@
 Все параметры объявлены в `defaults/main.yml`. Режим по умолчанию использует
 готовые Kubernetes Secrets (`k8s_postgresql_init_admin_secret_name` и
 `k8s_postgresql_init_user_secret_name`) и не создаёт, не изменяет и не удаляет их.
+Роль сама делает preflight переданных Secret'ов: ожидает наличие, ключи и
+непустые значения (`k8s_postgresql_init_secret_preflight_retries`, 12 × 5s) —
+consumer playbook не ждёт секреты и не знает их источник (чарт/VSO).
 Username администратора в этом режиме приходит либо ключом
 `k8s_postgresql_init_admin_username_key` из готового Secret, либо inline через
 `k8s_postgresql_init_admin_user` — по умолчанию оба входа пустые, потребитель

@@ -21,6 +21,9 @@ k8s_postgresql_init_user_username_key: MOT_DATABASE_USERNAME
 k8s_postgresql_init_user_secret_key: MOT_DATABASE_PASSWORD
 k8s_postgresql_init_timeout: 330
 k8s_postgresql_init_manage_credentials: false
+# Preflight готовых Secret'ов (режим existing/ready Secrets): ожидание наличия,
+# ключей и непустых значений перед созданием Job'а; 12 ретраев × 5s.
+k8s_postgresql_init_secret_preflight_retries: 12
 # В режиме готовых Secrets задаёт username администратора inline (взаимо-
 # исключаем с k8s_postgresql_init_admin_username_key). В режиме credentials
 # используется напрямую как username администратора временного Secret'а.
