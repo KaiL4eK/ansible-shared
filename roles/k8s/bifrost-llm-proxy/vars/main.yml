@@ -1,0 +1,18 @@
+---
+# Значения storage.logsStore.postgres чарта Bifrost, собираемые из входов
+# bifrost_llm_proxy_logs_postgres_*. Вычисляется в vars роли: выражение всегда
+# доступно задачам независимо от того, переопределяет ли плейбук входы.
+# existingSecret имеет приоритет над паролем (контракт чарта); поля
+# passwordCommand/connMaxLifetime не поддерживаются этой ролью.
+bifrost_llm_proxy_logs_postgres_values: >-
+  {{ {'enabled': true,
+      'host': bifrost_llm_proxy_logs_postgres_host,
+      'port': bifrost_llm_proxy_logs_postgres_port | int,
+      'user': bifrost_llm_proxy_logs_postgres_user,
+      'database': bifrost_llm_proxy_logs_postgres_db,
+      'sslMode': bifrost_llm_proxy_logs_postgres_ssl_mode}
+     | combine({'password': bifrost_llm_proxy_logs_postgres_password}
+               if bifrost_llm_proxy_logs_postgres_password | length > 0 else {})
+     | combine({'existingSecret': bifrost_llm_proxy_logs_postgres_existing_secret,
+                'passwordKey': bifrost_llm_proxy_logs_postgres_existing_secret_password_key}
+               if bifrost_llm_proxy_logs_postgres_existing_secret | length > 0 else {}) }}

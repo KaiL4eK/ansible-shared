@@ -1,5 +1,24 @@
 ---
 # https://artifacthub.io/packages/helm/bifrost/bifrost
+- name: Validate separate logs-store PostgreSQL inputs
+  ansible.builtin.assert:
+    that:
+      - bifrost_llm_proxy_logs_postgres_host | length > 0
+      - bifrost_llm_proxy_logs_postgres_port | int in range(1, 65536)
+      - bifrost_llm_proxy_logs_postgres_db | length > 0
+      - bifrost_llm_proxy_logs_postgres_user | length > 0
+      - bifrost_llm_proxy_logs_postgres_ssl_mode in ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']
+      # Пароль и existingSecret взаимно исключают друг друга (контракт чарта).
+      - (bifrost_llm_proxy_logs_postgres_password | length > 0) != (bifrost_llm_proxy_logs_postgres_existing_secret | length > 0)
+      - bifrost_llm_proxy_logs_postgres_existing_secret_password_key | length > 0
+    fail_msg: >-
+      Separate logs-store PostgreSQL requires host, port, database, user,
+      exactly one of password or existingSecret, and a valid ssl mode.
+  when:
+    - bifrost_llm_proxy_logs_store_enabled | bool
+    - bifrost_llm_proxy_logs_store_type == 'postgres'
+    - bifrost_llm_proxy_logs_postgres_enabled | bool
+
 - name: Add Bifrost LLM Proxy helm repository
   kubernetes.core.helm_repository:
     name: "{{ bifrost_llm_proxy_chart_repo_name }}"
@@ -80,6 +99,12 @@
         logsStore:
           enabled: "{{ bifrost_llm_proxy_logs_store_enabled | bool }}"
           type: "{{ bifrost_llm_proxy_logs_store_type }}"
+          postgres: >-
+            {{ bifrost_llm_proxy_logs_postgres_values
+               if (bifrost_llm_proxy_logs_store_enabled | bool
+                   and bifrost_llm_proxy_logs_store_type == 'postgres'
+                   and bifrost_llm_proxy_logs_postgres_enabled | bool)
+               else omit }}
   no_log: true
 
 - name: Patch Bifrost LLM Proxy service with fixed NodePort for HTTP
@@ -206,7 +231,13 @@
         ports:
           # nodePort is only valid for NodePort services, so merge it in
           # conditionally rather than emitting a key the API would reject.
-          - "{{ {'name': 'http', 'port': bifrost_llm_proxy_metrics_service_port | int, 'targetPort': 'http', 'protocol': 'TCP'} | combine({'nodePort': bifrost_llm_proxy_metrics_service_node_port | int} if bifrost_llm_proxy_metrics_service_type == 'NodePort' else {}) }}"
+          - >-
+            {{ {'name': 'http',
+                'port': bifrost_llm_proxy_metrics_service_port | int,
+                'targetPort': 'http',
+                'protocol': 'TCP'}
+               | combine({'nodePort': bifrost_llm_proxy_metrics_service_node_port | int}
+                         if bifrost_llm_proxy_metrics_service_type == 'NodePort' else {}) }}
   when: bifrost_llm_proxy_metrics_enabled | bool
 
 - name: Deploy Bifrost LLM Proxy metrics nginx Ingress

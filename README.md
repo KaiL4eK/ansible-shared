@@ -55,9 +55,14 @@ Before working with this repository, install Ansible dependencies:
   `bifrost_llm_proxy_`: `encryption_key`, `auth_*`, `enforce_auth_on_inference`,
   `enable_logging`, `disable_content_logging`, `vk_rotation_cooldown`,
   `config_store_enabled`, `config_store_type`, `logs_store_enabled`,
-  `logs_store_type` и `persistence_*`. Auth доставляется через
-  `bifrost.governance.authConfig`, persistence — через `storage.persistence`
-  по структуре chart `2.1.43`.
+  `logs_store_type`, `persistence_*` и `logs_postgres_*`. Auth доставляется
+  через `bifrost.governance.authConfig`, persistence — через
+  `storage.persistence`, отдельный PostgreSQL для logs store — через
+  `storage.logsStore.postgres` (структура chart `2.1.43`). Входы
+  `logs_postgres_*` (`enabled`, `host`, `port`, `db`, `user`, `password`,
+  `existing_secret`, `existing_secret_password_key`, `ssl_mode`) включаются
+  при `logs_store_type: postgres`; пароль и `existingSecret` взаимно
+  исключают друг друга, пароль в Helm values не попадает при existingSecret.
   Значения credentials видимы держателям доступа к Helm release и ConfigMap;
   роль скрывает Helm task через `no_log`. `atomic` и `wait`
   настраиваются одноимёнными переменными с тем же префиксом (defaults `true`).
@@ -69,6 +74,11 @@ Before working with this repository, install Ansible dependencies:
 - `roles/k8s/postgresql/` deploys PostgreSQL to Kubernetes via the Bitnami
   Helm chart (fixed chart and image versions, optional metrics sidecar with
    ServiceMonitor, optional `postgresqlExtendedConf` tuning and extensions).
+  An empty `k8s_postgresql_admin_password` is allowed: the chart then
+  generates the admin password itself and keeps it in the release's own
+  Secret, reusing it on subsequent upgrades (the value is never stored in
+  Vault by the role); a non-empty password is passed to `auth.postgresPassword`
+  as before.
 - `roles/k8s/postgresql_init_db/` creates a PostgreSQL login-role and database
   through a short-lived in-cluster Job using a pinned official PostgreSQL client
   image; поддерживает готовые Secrets без изменения их жизненного цикла и передачу

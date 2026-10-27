@@ -79,6 +79,23 @@ bifrost_llm_proxy_config_store_type: postgres
 bifrost_llm_proxy_logs_store_enabled: true
 bifrost_llm_proxy_logs_store_type: postgres
 
+# --- Отдельный PostgreSQL для logs store -----------------------------------
+# Когда logs_store включён и имеет тип postgres, chart 2.1.43 позволяет
+# указать отдельный инстанс (storage.logsStore.postgres), зеркаля поля
+# postgresql.external. При выключенном bifrost_llm_proxy_logs_postgres_enabled
+# logs store использует общий блок bifrost_llm_proxy_postgres_*.
+# Пароль передаётся через existingSecret (ключ password), значение в Helm
+# values не попадает; пароль и имя Secret'а взаимно исключают друг друга.
+bifrost_llm_proxy_logs_postgres_enabled: false
+bifrost_llm_proxy_logs_postgres_host: ""
+bifrost_llm_proxy_logs_postgres_port: 5432
+bifrost_llm_proxy_logs_postgres_db: bifrost-logs
+bifrost_llm_proxy_logs_postgres_user: bifrost
+bifrost_llm_proxy_logs_postgres_password: ""
+bifrost_llm_proxy_logs_postgres_existing_secret: ""
+bifrost_llm_proxy_logs_postgres_existing_secret_password_key: password
+bifrost_llm_proxy_logs_postgres_ssl_mode: disable
+
 bifrost_llm_proxy_ingress_enabled: true
 bifrost_llm_proxy_ingress_host: llm-proxy-mllab.wavea.cc
 bifrost_llm_proxy_ingress_class_name: traefik

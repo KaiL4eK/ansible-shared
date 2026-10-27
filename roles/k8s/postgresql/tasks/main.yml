@@ -5,7 +5,10 @@
       - k8s_postgresql_namespace | length > 0
       - k8s_postgresql_release_name | length > 0
       - k8s_postgresql_chart_version | length > 0
-      - k8s_postgresql_admin_password | length > 0
+      # Пустой k8s_postgresql_admin_password допустим: тогда bitnami-чарт
+      # генерирует пароль сам и хранит в собственном Secret релиза
+      # (переиспользует его при последующих апгрейдах через lookup).
+      # В HashiCorp Vault такой админ-секрет не сохраняется.
       - k8s_postgresql_image_values is mapping
       - k8s_postgresql_resources_preset in ['none', 'nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge']
       - k8s_postgresql_resources is mapping
@@ -69,7 +72,9 @@
       image: "{{ k8s_postgresql_image_values }}"
       auth:
         enablePostgresUser: "{{ k8s_postgresql_enable_postgres_user | bool }}"
-        postgresPassword: "{{ k8s_postgresql_admin_password }}"
+        # Пустое значение не передаём: чарт сам генерирует пароль и хранит
+        # его в собственном Secret релиза (переиспользует при апгрейдах).
+        postgresPassword: "{{ k8s_postgresql_admin_password if k8s_postgresql_admin_password | length > 0 else omit }}"
       postgresqlSharedPreloadLibraries: "{{ _k8s_postgresql_shared_preload_libraries }}"
       primary:
         # Начиная с major-рефакторинга чарта (13.x) параметр top-level
