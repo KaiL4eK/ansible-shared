@@ -8,6 +8,14 @@
 Все параметры объявлены в `defaults/main.yml`. Режим по умолчанию использует
 готовые Kubernetes Secrets (`k8s_postgresql_init_admin_secret_name` и
 `k8s_postgresql_init_user_secret_name`) и не создаёт, не изменяет и не удаляет их.
+Username администратора в этом режиме приходит либо ключом
+`k8s_postgresql_init_admin_username_key` из готового Secret, либо inline через
+`k8s_postgresql_init_admin_user` — по умолчанию оба входа пустые, потребитель
+обязан задать ровно один. Inline
+вариант рассчитан на штатные чарт-Secret'ы bitnami, где хранится только ключ
+пароля (`postgres-password`), а администратор — `postgres`; пароль при этом
+всё равно читается из Secret (`k8s_postgresql_init_admin_secret_key`) и не
+попадает в Job spec.
 
 При `k8s_postgresql_init_manage_credentials: true` плейбук передаёт
 `k8s_postgresql_init_admin_user`, `k8s_postgresql_init_admin_password`,

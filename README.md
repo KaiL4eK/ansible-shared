@@ -37,13 +37,15 @@ Before working with this repository, install Ansible dependencies:
 
 - `roles/postgresql/init-db/` — прямое создание отсутствующих PostgreSQL user/DB;
   существующий пароль не меняется, ошибка проверки credentials останавливает
-  bootstrap. Такой же контракт у `roles/k8s/postgresql_init_db/`.
+  bootstrap. Такой же контракт у `roles/k8s/postgresql-init-db/`.
 
-- `roles/k8s/postgresql_schema/` — применение идемпотентных SQL-выражений
+- `roles/k8s/postgresql-schema/` — применение идемпотентных SQL-выражений
   (схема приложения) короткоживущим Job под учёткой приложения. Входы:
   target namespace/host/port/db/sslmode, user/password (временный Secret через
-  `secretKeyRef`, удаление в `always`), список statements и префикс имени Job.
-  Только managed-credentials режим, check mode отклоняется.
+  `secretKeyRef`, удаление в `always`), список statements (допускают psql
+  meta-команды `\getenv`/`\gexec`), опциональный `secret_env` — секретные
+  значения для SQL через `secretKeyRef` (не попадают в Job spec), и префикс
+  имени Job. Только managed-credentials режим, check mode отклоняется.
 
 - `roles/k8s/vault/` — Vault с внешним PostgreSQL backend, credentials через
   Secret, ручные init/unseal; [контракт роли](roles/k8s/vault/README.md).
@@ -79,10 +81,15 @@ Before working with this repository, install Ansible dependencies:
   Secret, reusing it on subsequent upgrades (the value is never stored in
   Vault by the role); a non-empty password is passed to `auth.postgresPassword`
   as before.
-- `roles/k8s/postgresql_init_db/` creates a PostgreSQL login-role and database
+- `roles/k8s/postgresql-init-db/` creates a PostgreSQL login-role and database
   through a short-lived in-cluster Job using a pinned official PostgreSQL client
   image; поддерживает готовые Secrets без изменения их жизненного цикла и передачу
-  credentials с созданием/удалением временного Secret самой ролью.
+  credentials с созданием/удалением временного Secret самой ролью. В режиме
+  готовых Secrets username администратора берётся либо из ключа Secret
+  (`k8s_postgresql_init_admin_username_key`), либо inline
+  (`k8s_postgresql_init_admin_user`, например `postgres` для штатного
+  чарт-Secret bitnami с единственным ключом `postgres-password`) — ровно один
+  из входов; пароль администратора всегда читается из готового Secret.
 - `roles/k8s/vault-secrets-operator/` deploys the official HashiCorp VSO Helm
   chart with pinned chart and image versions; per-consumer Vault auth and sync
   resources remain owned by the consumer/infrastructure playbook.

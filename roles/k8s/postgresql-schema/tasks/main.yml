@@ -16,9 +16,29 @@
       - k8s_postgresql_schema_statements is sequence
       - k8s_postgresql_schema_statements is not string
       - k8s_postgresql_schema_statements | length > 0
+      # secret_env: имена ENV_NAME-формата, значения непустые, без дублей и
+      # коллизий со служебными env Job'а и ключами временного Secret роли.
+      - k8s_postgresql_schema_secret_env is sequence
+      - k8s_postgresql_schema_secret_env is not string
+      - >-
+        {{ k8s_postgresql_schema_secret_env | map(attribute='name')
+           | select('match', '^[A-Z][A-Z0-9_]*$') | list | length
+           == k8s_postgresql_schema_secret_env | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env | map(attribute='name') | list
+           | unique | length == k8s_postgresql_schema_secret_env | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env | map(attribute='value')
+           | select('!=', '') | list | length
+           == k8s_postgresql_schema_secret_env | length }}
+      - >-
+        {{ k8s_postgresql_schema_secret_env | map(attribute='name')
+           | intersect(['PGHOST', 'PGPORT', 'PGDATABASE', 'PGSSLMODE',
+                        'PGUSER', 'PGPASSWORD', 'APP_USERNAME', 'APP_PASSWORD'])
+           | length == 0 }}
     fail_msg: >-
-      Provide target database parameters and a non-empty list of SQL statements;
-      check mode is not supported.
+      Provide target database parameters, a non-empty list of SQL statements
+      and well-formed secret_env entries; check mode is not supported.
   no_log: true
 
 - name: Check the explicitly selected kubeconfig without reading it
@@ -63,14 +83,45 @@
               app.kubernetes.io/name: postgresql-schema
               app.kubernetes.io/managed-by: ansible
           type: Opaque
-          stringData:
-            APP_USERNAME: "{{ k8s_postgresql_schema_user }}"
-            APP_PASSWORD: "{{ k8s_postgresql_schema_password }}"
+          stringData: >-
+            {{ {'APP_USERNAME': k8s_postgresql_schema_user,
+                'APP_PASSWORD': k8s_postgresql_schema_password}
+               | combine(k8s_postgresql_schema_secret_env
+                         | ansible.builtin.items2dict(key_name='name', value_name='value')) }}
       register: k8s_postgresql_schema_credentials_secret
       no_log: true
       diff: false
 
     - name: Apply the schema with a short-lived Job
+      vars:
+        # Реальный перевод строки: YAML-скаляр в двойных кавычках раскрывается
+        # до Jinja (join('\n') в выражении даёт литеральный \n — AGENTS.md).
+        k8s_postgresql_schema_newline: "\n"
+        # Выражения склеиваются построчно как есть: каждое SQL-выражение
+        # потребитель завершает собственным ';' (psql исполняет буфер на ';');
+        # выражение, питающее следующую meta-команду (\gexec), идёт без ';'.
+        k8s_postgresql_schema_psql_script: >-
+          {{ k8s_postgresql_schema_statements
+             | map('trim') | select('!=', '')
+             | join(k8s_postgresql_schema_newline) }}
+        # Env Job'а собирается структурой данных: secret_env-записи не
+        # выражаются статическим YAML (образец — k8s/postgresql-init-db).
+        # Имя временного Secret подставляется в secretKeyRef каждой записи.
+        k8s_postgresql_schema_env: >-
+          {{ [{'name': 'PGHOST', 'value': k8s_postgresql_schema_host},
+              {'name': 'PGPORT', 'value': k8s_postgresql_schema_port | string},
+              {'name': 'PGDATABASE', 'value': k8s_postgresql_schema_database},
+              {'name': 'PGSSLMODE', 'value': k8s_postgresql_schema_sslmode},
+              {'name': 'PGUSER',
+               'valueFrom': {'secretKeyRef': {'name': k8s_postgresql_schema_credentials_secret.result.metadata.name, 'key': 'APP_USERNAME'}}},
+              {'name': 'PGPASSWORD',
+               'valueFrom': {'secretKeyRef': {'name': k8s_postgresql_schema_credentials_secret.result.metadata.name, 'key': 'APP_PASSWORD'}}}]
+             + (k8s_postgresql_schema_secret_env | map(attribute='name')
+                | map('regex_replace', '^(.+)$',
+                      '{"name": "\1", "valueFrom": {"secretKeyRef": {"name": "'
+                      ~ k8s_postgresql_schema_credentials_secret.result.metadata.name
+                      ~ '", "key": "\1"}}}')
+                | map('ansible.builtin.from_json') | list) }}
       kubernetes.core.k8s:
         state: present
         force: true
@@ -102,29 +153,9 @@
                     args:
                       - |
                         psql --no-password --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
-                        {{ k8s_postgresql_schema_statements
-                           | map('trim') | select('!=', '')
-                           | map('regex_replace', ';+$', '') | join(';') }};
+                        {{ k8s_postgresql_schema_psql_script }}
                         SQL
-                    env:
-                      - name: PGHOST
-                        value: "{{ k8s_postgresql_schema_host }}"
-                      - name: PGPORT
-                        value: "{{ k8s_postgresql_schema_port | string }}"
-                      - name: PGDATABASE
-                        value: "{{ k8s_postgresql_schema_database }}"
-                      - name: PGSSLMODE
-                        value: "{{ k8s_postgresql_schema_sslmode }}"
-                      - name: PGUSER
-                        valueFrom:
-                          secretKeyRef:
-                            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
-                            key: APP_USERNAME
-                      - name: PGPASSWORD
-                        valueFrom:
-                          secretKeyRef:
-                            name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
-                            key: APP_PASSWORD
+                    env: "{{ k8s_postgresql_schema_env }}"
                     resources:
                       requests:
                         cpu: 10m

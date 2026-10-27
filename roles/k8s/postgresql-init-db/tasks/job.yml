@@ -12,14 +12,49 @@
       - k8s_postgresql_init_database is match('^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$')
       - k8s_postgresql_init_admin_secret_name is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
       - k8s_postgresql_init_user_secret_name is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
-      - k8s_postgresql_init_admin_username_key | length > 0
       - k8s_postgresql_init_admin_secret_key | length > 0
       - k8s_postgresql_init_user_username_key | length > 0
       - k8s_postgresql_init_user_secret_key | length > 0
+      # Username администратора приходит либо ключом готового Secret, либо
+      # inline (пример — штатный чарт-Secret bitnami без ключа username).
+      - >-
+        (k8s_postgresql_init_admin_username_key | length > 0)
+        != (k8s_postgresql_init_admin_user | length > 0)
       - k8s_postgresql_init_timeout | int > 30
+    fail_msg: >-
+      Provide either k8s_postgresql_init_admin_username_key (Secret key with the
+      admin username) or k8s_postgresql_init_admin_user (inline admin username),
+      exactly one of them; got key length
+      {{ k8s_postgresql_init_admin_username_key | length }} and user length
+      {{ k8s_postgresql_init_admin_user | length }}.
   no_log: true
 
 - name: Create short-lived PostgreSQL initialization Job
+  vars:
+    # Env Job'а собирается структурой данных: условный value/secretKeyRef для
+    # PGUSER не выражается статическим YAML в определении Job, а Jinja-теги
+    # в тексте ломаются trim_blocks при шаблонизации Ansible.
+    k8s_postgresql_init_env: >-
+      {{ [{'name': 'PGHOST', 'value': k8s_postgresql_init_host},
+          {'name': 'PGPORT', 'value': k8s_postgresql_init_port | string},
+          {'name': 'PGDATABASE', 'value': k8s_postgresql_init_admin_database}]
+         + [{'name': 'PGUSER'}
+            | combine({'value': k8s_postgresql_init_admin_user}
+                      if k8s_postgresql_init_admin_user | length > 0
+                      else {'valueFrom': {'secretKeyRef':
+                                          {'name': k8s_postgresql_init_admin_secret_name,
+                                           'key': k8s_postgresql_init_admin_username_key}}})]
+         + [{'name': 'PGSSLMODE', 'value': k8s_postgresql_init_sslmode},
+            {'name': 'PGPASSWORD', 'valueFrom': {'secretKeyRef':
+                                                 {'name': k8s_postgresql_init_admin_secret_name,
+                                                  'key': k8s_postgresql_init_admin_secret_key}}},
+            {'name': 'APP_DATABASE', 'value': k8s_postgresql_init_database},
+            {'name': 'APP_DB_USER', 'valueFrom': {'secretKeyRef':
+                                                  {'name': k8s_postgresql_init_user_secret_name,
+                                                   'key': k8s_postgresql_init_user_username_key}}},
+            {'name': 'APP_DB_PASSWORD', 'valueFrom': {'secretKeyRef':
+                                                      {'name': k8s_postgresql_init_user_secret_name,
+                                                       'key': k8s_postgresql_init_user_secret_key}}}] }}
   kubernetes.core.k8s:
     state: present
     force: true
@@ -105,37 +140,7 @@
                     \gexec
 
                     SQL
-                env:
-                  - name: PGHOST
-                    value: "{{ k8s_postgresql_init_host }}"
-                  - name: PGPORT
-                    value: "{{ k8s_postgresql_init_port | string }}"
-                  - name: PGDATABASE
-                    value: "{{ k8s_postgresql_init_admin_database }}"
-                  - name: PGUSER
-                    valueFrom:
-                      secretKeyRef:
-                        name: "{{ k8s_postgresql_init_admin_secret_name }}"
-                        key: "{{ k8s_postgresql_init_admin_username_key }}"
-                  - name: PGSSLMODE
-                    value: "{{ k8s_postgresql_init_sslmode }}"
-                  - name: PGPASSWORD
-                    valueFrom:
-                      secretKeyRef:
-                        name: "{{ k8s_postgresql_init_admin_secret_name }}"
-                        key: "{{ k8s_postgresql_init_admin_secret_key }}"
-                  - name: APP_DATABASE
-                    value: "{{ k8s_postgresql_init_database }}"
-                  - name: APP_DB_USER
-                    valueFrom:
-                      secretKeyRef:
-                        name: "{{ k8s_postgresql_init_user_secret_name }}"
-                        key: "{{ k8s_postgresql_init_user_username_key }}"
-                  - name: APP_DB_PASSWORD
-                    valueFrom:
-                      secretKeyRef:
-                        name: "{{ k8s_postgresql_init_user_secret_name }}"
-                        key: "{{ k8s_postgresql_init_user_secret_key }}"
+                env: "{{ k8s_postgresql_init_env }}"
                 resources:
                   requests:
                     cpu: 10m

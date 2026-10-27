@@ -9,13 +9,21 @@ k8s_postgresql_init_sslmode: prefer
 k8s_postgresql_init_admin_database: postgres
 k8s_postgresql_init_database: ""
 k8s_postgresql_init_admin_secret_name: ""
-k8s_postgresql_init_admin_username_key: POSTGRES_ADMIN_USERNAME
+# В режиме готовых Secrets username администратора приходит либо этим ключом
+# из готового Secret, либо inline через k8s_postgresql_init_admin_user
+# (например postgres для штатного чарт-Secret bitnami без ключа username) —
+# ровно один из двух входов непустой. В режиме credentials ключ инжектится
+# ролью, поэтому дефолт пустой.
+k8s_postgresql_init_admin_username_key: ""
 k8s_postgresql_init_admin_secret_key: POSTGRES_ADMIN_PASSWORD
 k8s_postgresql_init_user_secret_name: ""
 k8s_postgresql_init_user_username_key: MOT_DATABASE_USERNAME
 k8s_postgresql_init_user_secret_key: MOT_DATABASE_PASSWORD
 k8s_postgresql_init_timeout: 330
 k8s_postgresql_init_manage_credentials: false
+# В режиме готовых Secrets задаёт username администратора inline (взаимо-
+# исключаем с k8s_postgresql_init_admin_username_key). В режиме credentials
+# используется напрямую как username администратора временного Secret'а.
 k8s_postgresql_init_admin_user: ""
 k8s_postgresql_init_admin_password: ""
 k8s_postgresql_init_user: ""

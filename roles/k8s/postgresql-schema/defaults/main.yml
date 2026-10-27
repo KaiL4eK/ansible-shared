@@ -1,0 +1,22 @@
+---
+# Neutral default; consumers should select their target namespace explicitly.
+k8s_postgresql_schema_namespace: default
+k8s_postgresql_schema_job_name: postgresql-schema
+k8s_postgresql_schema_image: postgres:17.6-bookworm
+k8s_postgresql_schema_host: ""
+k8s_postgresql_schema_port: 5432
+k8s_postgresql_schema_sslmode: prefer
+k8s_postgresql_schema_database: ""
+k8s_postgresql_schema_user: ""
+k8s_postgresql_schema_password: ""
+# Идемпотентные SQL-выражения (CREATE ... IF NOT EXISTS), выполняются одним psql:
+# каждое завершается собственным ';'; выражение, питающее следующую
+# meta-команду (\gexec), идёт без ';'. psql meta-команды — отдельные элементы.
+k8s_postgresql_schema_statements: []
+# Дополнительные секретные значения для SQL: список {name: ENV_NAME, value}.
+# Попадают только в stringData временного Secret и в env Job'а через
+# secretKeyRef (имя env == ключу Secret); не отображаются в Job spec и логах.
+# В выражениях читаются psql-метакомандой \getenv (psql >= 15).
+k8s_postgresql_schema_secret_env: []
+k8s_postgresql_schema_timeout: 330
+k8s_postgresql_schema_kubeconfig: ""
