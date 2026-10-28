@@ -1,0 +1,32 @@
+---
+# Валидация входов роли (REQ-4): обязательные параметры проверяются до первого
+# изменяющего действия. Перечень обязательных входов определяется здесь,
+# а не в defaults. fail_msg динамический: перечисляет пустые. Файл выделен,
+# чтобы валидацию можно было прогонять скретч-плейбуком без выполнения
+# основной логики роли (include_role с tasks_from: validate_inputs.yml).
+# Важно: сообщения assert'а не видят vars: задачи, поэтому все значения для
+# них готовятся заранее через set_fact (факты живут до конца play).
+# Списочные входы нормализуются к строке (join), чтобы проверка пустоты была
+# единой со строковыми.
+- name: Собрать карту обязательных входов
+  ansible.builtin.set_fact:
+    k8s_docker_registry_cleanup_mandatory_inputs:
+      k8s_docker_registry_cleanup_namespace: "{{ k8s_docker_registry_cleanup_namespace }}"
+      k8s_docker_registry_cleanup_registry_url: "{{ k8s_docker_registry_cleanup_registry_url }}"
+      k8s_docker_registry_cleanup_keep_tags: "{{ k8s_docker_registry_cleanup_keep_tags | join(',') }}"
+      k8s_docker_registry_cleanup_keep_tag_patterns: "{{ k8s_docker_registry_cleanup_keep_tag_patterns | join(',') }}"
+
+- name: Собрать список пустых обязательных входов
+  ansible.builtin.set_fact:
+    k8s_docker_registry_cleanup_empty_inputs: >-
+      {{ k8s_docker_registry_cleanup_mandatory_inputs | dict2items
+         | selectattr('value', 'match', '^$')
+         | map(attribute='key') | list }}
+
+- name: Проверить обязательные входы роли
+  ansible.builtin.assert:
+    that:
+      - k8s_docker_registry_cleanup_empty_inputs | length == 0
+    fail_msg: >-
+      Пустые обязательные входы роли (заполняет плейбук): {{ k8s_docker_registry_cleanup_empty_inputs | join(', ') }}
+    success_msg: "Обязательные входы роли заполнены ({{ k8s_docker_registry_cleanup_mandatory_inputs | length }} параметров)"

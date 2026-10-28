@@ -1,0 +1,78 @@
+---
+- name: Валидировать обязательные входы роли
+  ansible.builtin.include_tasks: validate_inputs.yml
+
+- name: Создать ConfigMap со скриптом чистки
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ k8s_docker_registry_cleanup_name }}-script"
+        namespace: "{{ k8s_docker_registry_cleanup_namespace }}"
+        labels:
+          app: "{{ k8s_docker_registry_cleanup_name }}"
+      data:
+        registry_cleanup.py: "{{ lookup('ansible.builtin.file', 'registry_cleanup.py') }}"
+    apply: true
+
+# Удаляет манифесты по digest через API реестра (требует storage.delete.enabled
+# на Helm-релизе docker-registry). Место освобождает garbage-collect чарта.
+- name: Создать CronJob чистки реестра
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: "{{ k8s_docker_registry_cleanup_name }}"
+        namespace: "{{ k8s_docker_registry_cleanup_namespace }}"
+        labels:
+          app: "{{ k8s_docker_registry_cleanup_name }}"
+      spec:
+        schedule: "{{ k8s_docker_registry_cleanup_schedule }}"
+        concurrencyPolicy: Forbid
+        startingDeadlineSeconds: "{{ k8s_docker_registry_cleanup_starting_deadline_seconds }}"
+        successfulJobsHistoryLimit: "{{ k8s_docker_registry_cleanup_successful_jobs_history_limit }}"
+        failedJobsHistoryLimit: "{{ k8s_docker_registry_cleanup_failed_jobs_history_limit }}"
+        jobTemplate:
+          spec:
+            backoffLimit: "{{ k8s_docker_registry_cleanup_backoff_limit }}"
+            activeDeadlineSeconds: "{{ k8s_docker_registry_cleanup_active_deadline_seconds }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ k8s_docker_registry_cleanup_name }}"
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: cleanup
+                    image: "{{ k8s_docker_registry_cleanup_image }}"
+                    imagePullPolicy: IfNotPresent
+                    command:
+                      - python3
+                      - /scripts/registry_cleanup.py
+                    env:
+                      - name: REGISTRY_URL
+                        value: "{{ k8s_docker_registry_cleanup_registry_url }}"
+                      - name: KEEP_TAGS
+                        value: "{{ k8s_docker_registry_cleanup_keep_tags | join(',') }}"
+                      - name: KEEP_TAG_PATTERNS
+                        value: "{{ k8s_docker_registry_cleanup_keep_tag_patterns | join(',') }}"
+                      - name: KEEP_MIN_PER_REPO
+                        value: "{{ k8s_docker_registry_cleanup_keep_min_per_repo | string }}"
+                      - name: KEEP_DAYS
+                        value: "{{ k8s_docker_registry_cleanup_keep_days | string }}"
+                      - name: DRY_RUN
+                        value: "{{ 'true' if k8s_docker_registry_cleanup_dry_run | bool else 'false' }}"
+                      - name: PYTHONUNBUFFERED
+                        value: "1"
+                    resources: "{{ k8s_docker_registry_cleanup_resources }}"
+                    volumeMounts:
+                      - name: script
+                        mountPath: /scripts
+                        readOnly: true
+                volumes:
+                  - name: script
+                    configMap:
+                      name: "{{ k8s_docker_registry_cleanup_name }}-script"
+    apply: true

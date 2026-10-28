@@ -116,6 +116,16 @@ Before working with this repository, install Ansible dependencies:
   failure notifications and an on-demand per-bucket restore Job (optional
   bucket/IAM metadata import for disaster recovery) driven by consumer
   playbooks.
+- `roles/k8s/docker-registry-cleanup/` — ночной CronJob чистки тегов Docker
+  Registry v2: удаляет устаревшие манифесты по digest через Registry API
+  (удаление в реестре должно быть включено; место освобождает его
+  garbage-collect). Скрипт чистки доставляется ConfigMap. Входы с префиксом
+  `k8s_docker_registry_cleanup_`: namespace, in-cluster URL реестра,
+  расписание, пин образа (python-alpine, только stdlib), политика retention
+  (`keep_tags` — вечные теги, `keep_tag_patterns` — всегда защищаемые regex,
+  `keep_min_per_repo`, `keep_days`), dry-run и лимиты Job. Обязательные входы
+  проверяет `tasks/validate_inputs.yml`; его можно прогонять скретч-плейбуком
+  отдельно от основной логики роли.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
   service.
 - `roles/hermes/agent_env/` manages explicit Hermes environment values in the

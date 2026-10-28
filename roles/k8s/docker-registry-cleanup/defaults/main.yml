@@ -1,0 +1,39 @@
+---
+# Namespace реестра; задаётся плейбуком
+k8s_docker_registry_cleanup_namespace: ""
+k8s_docker_registry_cleanup_name: docker-registry-cleanup
+
+# Расписание в UTC; на час раньше garbage-collect чарта ("0 1 * * *"),
+# чтобы удалённые за ночь манифесты зачищались его же проходом
+k8s_docker_registry_cleanup_schedule: "0 0 * * *"
+
+# Образ зафиксирован (только stdlib, внешних зависимостей у скрипта нет)
+k8s_docker_registry_cleanup_image: python:3.12.12-alpine3.23
+
+# In-cluster URL реестра (v2 API); задаёт плейбук
+k8s_docker_registry_cleanup_registry_url: http://docker-registry:5000
+
+# Политика retention; конкретные значения задаёт плейбук.
+# keep_tag_patterns — регулярные выражения всегда защищаемых тегов
+k8s_docker_registry_cleanup_keep_tags:
+  - latest
+  - stable
+  - latest-stable
+k8s_docker_registry_cleanup_keep_tag_patterns: []
+k8s_docker_registry_cleanup_keep_min_per_repo: 10
+k8s_docker_registry_cleanup_keep_days: 30
+k8s_docker_registry_cleanup_dry_run: false
+
+k8s_docker_registry_cleanup_starting_deadline_seconds: 900
+k8s_docker_registry_cleanup_active_deadline_seconds: 3600
+k8s_docker_registry_cleanup_backoff_limit: 1
+k8s_docker_registry_cleanup_successful_jobs_history_limit: 3
+k8s_docker_registry_cleanup_failed_jobs_history_limit: 3
+
+k8s_docker_registry_cleanup_resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
