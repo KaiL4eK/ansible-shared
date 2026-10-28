@@ -1,0 +1,22 @@
+---
+# Роль: идемпотентная запись записей KV v2 в HashiCorp Vault через AppRole.
+# Для каждой записи (path + fields): читает текущую версию, сохраняет
+# существующие значения (keep_existing), генерирует отсутствующие
+# (community.general.random_string), ротирует по флагу и пишет с CAS.
+# Значения наружу не выводятся: только sanitized-статусы и summary.
+# Результат для вызывающего плейбука — fact k8s_vault_kv_summary
+# ([{path, action, changed_fields}]).
+k8s_vault_kv_address: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | regex_replace('/+$', '') }}"
+k8s_vault_kv_role_id: "{{ lookup('ansible.builtin.env', 'VAULT_ROLE_ID') }}"
+k8s_vault_kv_secret_id: "{{ lookup('ansible.builtin.env', 'VAULT_SECRET_ID') }}"
+
+# Mount KV v2 и список записей: [{path: <путь без префикса mount>,
+# fields: {<имя>: {length, special, rotate, keep_existing, value}}}].
+# Дефолт mount — канонический `secret`; consumer передаёт конкретный
+# mount явно (deployment-specific значение в роль не зашивается).
+k8s_vault_kv_mount: secret
+k8s_vault_kv_records: []
+
+# Параметры генерации по умолчанию: буквенно-цифровые пароли без спецсимволов.
+k8s_vault_kv_default_length: 32
+k8s_vault_kv_default_special: false

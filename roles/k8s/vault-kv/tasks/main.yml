@@ -1,0 +1,202 @@
+---
+# AppRole login → чтение текущих версий → вычисление желаемых значений
+# (keep_existing / generate / rotate / literal) → CAS-запись изменившихся.
+# Всё, что содержит значения или токены, выполняется под no_log; наружу —
+# только статусы и summary. Токен отзывается в always.
+- name: Evaluate role inputs without exposing credentials
+  ansible.builtin.set_fact:
+    k8s_vault_kv_preflight:
+      VAULT_ADDR_https_or_loopback_http: >-
+        {{ k8s_vault_kv_address is match('^https://[^ ]+$') or
+           k8s_vault_kv_address is match('^http://(127\.0\.0\.1|localhost)(:[0-9]+)?$') }}
+      VAULT_ROLE_ID_format: "{{ k8s_vault_kv_role_id is match('^[A-Za-z0-9_-]+$') }}"
+      VAULT_SECRET_ID_nonempty: "{{ k8s_vault_kv_secret_id | length > 0 }}"
+      records_present: "{{ k8s_vault_kv_records | length > 0 }}"
+  no_log: true
+
+- name: Validate role inputs
+  ansible.builtin.assert:
+    that:
+      - item.value | bool
+    fail_msg: "Не пройдена проверка {{ item.key }}. Значение скрыто."
+    quiet: true
+  loop: "{{ k8s_vault_kv_preflight | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Reconcile KV v2 records in the agent mount
+  block:
+    - name: Log in to Vault with the agent AppRole
+      ansible.builtin.uri:
+        url: "{{ k8s_vault_kv_address }}/v1/auth/approle/login"
+        method: POST
+        body_format: json
+        body:
+          role_id: "{{ k8s_vault_kv_role_id }}"
+          secret_id: "{{ k8s_vault_kv_secret_id }}"
+        status_code: 200
+        return_content: true
+        use_proxy: false
+        follow_redirects: none
+      register: k8s_vault_kv_login
+      no_log: true
+      diff: false
+
+    - name: Validate the AppRole login response
+      ansible.builtin.assert:
+        that:
+          - k8s_vault_kv_login.json.auth.client_token | default('') | length > 0
+        fail_msg: Vault AppRole authentication did not return a client token.
+      no_log: true
+
+    - name: Store the temporary Vault token
+      ansible.builtin.set_fact:
+        k8s_vault_kv_token: "{{ k8s_vault_kv_login.json.auth.client_token }}"
+      no_log: true
+      diff: false
+
+    - name: Read and write records over the Vault API
+      module_defaults:
+        ansible.builtin.uri:
+          headers:
+            X-Vault-Token: "{{ k8s_vault_kv_token }}"
+          body_format: json
+          return_content: true
+          use_proxy: false
+          follow_redirects: none
+          unredirected_headers: [X-Vault-Token]
+      no_log: true
+      block:
+        - name: Read current KV v2 records
+          ansible.builtin.uri:
+            url: "{{ k8s_vault_kv_address }}/v1/{{ k8s_vault_kv_mount }}/data/{{ item.path }}"
+            status_code: [200, 404]
+          loop: "{{ k8s_vault_kv_records }}"
+          loop_control:
+            label: "{{ item.path }}"
+          register: k8s_vault_kv_reads
+          changed_when: false
+
+        - name: Normalize current record data and versions
+          ansible.builtin.set_fact:
+            k8s_vault_kv_current: "{{ k8s_vault_kv_current | default([]) + [current_entry] }}"
+          vars:
+            current_entry: >-
+              {{ {'path': item.item.path,
+                  'data': (item.json.data.data | default({})) if item.status == 200 else {},
+                  'version': (item.json.data.metadata.version | default(0) | int) if item.status == 200 else 0} }}
+          loop: "{{ k8s_vault_kv_reads.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+
+        - name: Flatten record fields into per-field entries
+          ansible.builtin.set_fact:
+            k8s_vault_kv_fields: |
+              {%- set entries = [] -%}
+              {%- for record in k8s_vault_kv_records -%}
+              {%-   set cur_data = k8s_vault_kv_current | selectattr('path', 'equalto', record.path) | map(attribute='data') | list | first | default({}) -%}
+              {%-   for name, spec in (record.fields | default({})).items() -%}
+              {%-     set _ = entries.append({'path': record.path, 'name': name, 'spec': spec | default({}), 'current': cur_data.get(name, '')}) -%}
+              {%-   endfor -%}
+              {%- endfor -%}
+              {{ entries }}
+
+        - name: Compute the desired value for each field
+          ansible.builtin.set_fact:
+            k8s_vault_kv_field_values: "{{ k8s_vault_kv_field_values | default([]) + [field_value_entry] }}"
+          vars:
+            field_spec: "{{ item.spec }}"
+            field_length: "{{ field_spec.length | default(k8s_vault_kv_default_length) | int }}"
+            field_special: "{{ field_spec.special | default(k8s_vault_kv_default_special) | bool }}"
+            field_state: >-
+              {{ 'rotated' if (field_spec.rotate | default(false) | bool) else
+                 ('literal' if (field_spec.value | default('') | string | length > 0) else
+                 ('kept' if ((field_spec.keep_existing | default(true) | bool) and (item.current | string | length > 0)) else 'generated')) }}
+            field_generated_value: "{{ lookup('community.general.random_string', length=field_length, special=field_special) }}"
+            field_value_entry: >-
+              {{ {'path': item.path, 'name': item.name, 'state': field_state,
+                  'value': field_generated_value if field_state in ['generated', 'rotated'] else
+                           (field_spec.value if field_state == 'literal' else item.current)} }}
+          loop: "{{ k8s_vault_kv_fields }}"
+          loop_control:
+            label: "{{ item.path }}/{{ item.name }}"
+
+        - name: Assemble the desired data and action for each record
+          ansible.builtin.set_fact:
+            k8s_vault_kv_plan: "{{ k8s_vault_kv_plan | default([]) + [plan_entry] }}"
+          vars:
+            record_fields: "{{ k8s_vault_kv_field_values | selectattr('path', 'equalto', item.path) | list }}"
+            record_current: >-
+              {{ k8s_vault_kv_current | selectattr('path', 'equalto', item.path) | map(attribute='data') | list | first | default({}) }}
+            record_version: >-
+              {{ k8s_vault_kv_current | selectattr('path', 'equalto', item.path) | map(attribute='version') | list | first | default(0) | int }}
+            desired_data: "{{ record_fields | items2dict(key_name='name', value_name='value') }}"
+            changed_fields: "{{ record_fields | selectattr('state', 'in', ['generated', 'rotated']) | map(attribute='name') | list }}"
+            plan_entry: >-
+              {{ {'path': item.path, 'data': desired_data,
+                  'action': 'write' if (desired_data != record_current) else 'unchanged',
+                  'changed_fields': changed_fields, 'cas': record_version} }}
+          loop: "{{ k8s_vault_kv_records }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+        - name: Write changed KV v2 records with compare-and-set
+          ansible.builtin.uri:
+            url: "{{ k8s_vault_kv_address }}/v1/{{ k8s_vault_kv_mount }}/data/{{ item.path }}"
+            method: POST
+            body:
+              options:
+                cas: "{{ item.cas | int }}"
+              data: "{{ item.data }}"
+            status_code: [200, 204]
+          loop: "{{ k8s_vault_kv_plan | selectattr('action', 'equalto', 'write') | list }}"
+          loop_control:
+            label: "{{ item.path }}"
+          register: k8s_vault_kv_writes
+          failed_when: false
+          changed_when: true
+
+        - name: Reduce write results to sanitized statuses
+          ansible.builtin.set_fact:
+            k8s_vault_kv_statuses: >-
+              {{ (k8s_vault_kv_statuses | default([])) +
+                 [{'path': item.item.path, 'status': item.status | default(0), 'skipped': item.skipped | default(false)}] }}
+          loop: "{{ k8s_vault_kv_writes.results | default([]) }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+
+        - name: Reduce the plan to a sanitized summary
+          ansible.builtin.set_fact:
+            k8s_vault_kv_summary: >-
+              {{ (k8s_vault_kv_summary | default([])) +
+                 [{'path': item.path, 'action': item.action, 'changed_fields': item.changed_fields}] }}
+          loop: "{{ k8s_vault_kv_plan }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+  always:
+    - name: Revoke the temporary Vault token
+      ansible.builtin.uri:
+        url: "{{ k8s_vault_kv_address }}/v1/auth/token/revoke-self"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ k8s_vault_kv_token }}"
+        status_code: [200, 204]
+        use_proxy: false
+        follow_redirects: none
+        unredirected_headers: [X-Vault-Token]
+      when: k8s_vault_kv_token is defined
+      no_log: true
+      diff: false
+
+- name: Validate sanitized write statuses
+  ansible.builtin.assert:
+    that:
+      - item.status | int in [200, 204] or item.skipped | bool
+    fail_msg: >-
+      KV v2 write failed for {{ item.path }} (HTTP {{ item.status }});
+      response body is hidden.
+    quiet: true
+  loop: "{{ k8s_vault_kv_statuses | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"

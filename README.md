@@ -50,6 +50,14 @@ Before working with this repository, install Ansible dependencies:
 - `roles/k8s/vault/` — Vault с внешним PostgreSQL backend, credentials через
   Secret, ручные init/unseal; [контракт роли](roles/k8s/vault/README.md).
 
+- `roles/k8s/vault-kv/` — идемпотентный reconcile записей KV v2 в заданном
+  mount через AppRole: чтение текущих версий, keep_existing/generate/rotate/
+  literal по полям, CAS-запись изменившихся, ревок временного токена в
+  `always`. Только Vault API с контроллера: без кластера, Kubernetes Secret'ов
+  и развёртывания Vault. Наружу — sanitized summary (fact `k8s_vault_kv_summary`,
+  без значений); policy AppRole должна разрешать `auth/token/revoke-self`.
+  [Контракт роли](roles/k8s/vault-kv/README.md).
+
 - `roles/k8s/bifrost-llm-proxy/` — Bifrost через официальный Helm chart.
   Credentials передаются непосредственно через Helm values; отдельный Secret
   роль не создаёт. Helm values формируются непосредственно из переменных роли,
