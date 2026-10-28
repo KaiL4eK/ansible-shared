@@ -27,7 +27,6 @@
       exactly one of them; got key length
       {{ k8s_postgresql_init_admin_username_key | length }} and user length
       {{ k8s_postgresql_init_admin_user | length }}.
-  no_log: true
 
 - name: Create short-lived PostgreSQL initialization Job
   vars:

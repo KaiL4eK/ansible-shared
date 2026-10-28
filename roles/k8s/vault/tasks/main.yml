@@ -19,7 +19,9 @@
   ansible.builtin.assert:
     that:
       - k8s_vault_pg_connection_url is match('^postgres(ql)?://')
+    fail_msg: Configure k8s_vault_pg_connection_url with a PostgreSQL connection URL.
   no_log: true
+  diff: false
 
 - name: Проверить существование namespace
   kubernetes.core.k8s_info:
@@ -64,6 +66,8 @@
     name: "{{ k8s_vault_unseal_secret_name }}"
   register: k8s_vault_unseal_secret_precheck
   when: k8s_vault_unseal_enabled
+  no_log: true
+  diff: false
 
 # StatefulSet монтирует Secret как volume: без него pod зависает в
 # ContainerCreating (FailedMount), а init выполняется только после запуска.
@@ -81,7 +85,6 @@
   when:
     - k8s_vault_unseal_enabled
     - k8s_vault_unseal_secret_precheck.resources | default([]) | length == 0
-  no_log: true
   diff: false
 
 - name: Подключить официальный репозиторий HashiCorp
@@ -104,6 +107,8 @@
     wait: "{{ k8s_vault_wait }}"
     timeout: "{{ k8s_vault_timeout }}"
     values: "{{ lookup('ansible.builtin.template', 'values.yml.j2') | from_yaml }}"
+  no_log: true
+  diff: false
 
 - name: Автоматически инициализировать и распечатать Vault
   when: k8s_vault_unseal_enabled
@@ -177,7 +182,6 @@
           sealed: >-
             {{ (((k8s_vault_status_raw.stdout | default('')) or '{}') | from_json).sealed
                | default(true) | bool }}
-      no_log: true
 
     - name: Проверить доступность Vault для exec
       ansible.builtin.assert:
@@ -360,7 +364,6 @@
           sealed: >-
             {{ (((k8s_vault_final_status_raw.stdout | default('')) or '{}') | from_json).sealed
                | default(true) | bool }}
-      no_log: true
 
     - name: Подтвердить распечатку Vault
       when: not k8s_vault_state.initialized or k8s_vault_state.sealed
