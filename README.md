@@ -76,6 +76,12 @@ Before working with this repository, install Ansible dependencies:
   Значения credentials видимы держателям доступа к Helm release и ConfigMap;
   роль скрывает Helm task через `no_log`. `atomic` и `wait`
   настраиваются одноимёнными переменными с тем же префиксом (defaults `true`).
+- `roles/k8s/helm-ci-kubeconfig/` — выдаёт kubeconfig отдельной CI identity
+  для Helm в существующей namespace через ServiceAccount, Role и RoleBinding;
+  типовой набор разрешений ограничен namespaced ресурсами, опциональные типы
+  включаются явно. HomeLab consumer playbooks выбирают namespace и передают
+  authorized source kubeconfig. См. роль README и тест
+  `tests/helm-ci-kubeconfig.yml`.
 - `roles/k8s/monitoring/` — общие роли дашбордов Grafana и
   PrometheusRule. Контракты и примеры: [мониторинг](roles/k8s/monitoring/README.md).
 - `roles/docker/nfs-server/` provides a shared Docker-based NFS server role.

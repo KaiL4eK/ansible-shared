@@ -1,0 +1,28 @@
+---
+# Explicit inputs are supplied by the operator playbook.
+k8s_helm_ci_name: ""
+k8s_helm_ci_namespace: ""
+k8s_helm_ci_source_kubeconfig: ""
+k8s_helm_ci_output_path: ""
+
+# The CI identity is never intended to run Pods.
+k8s_helm_ci_automount_service_account_token: false
+
+# Standard namespaced Helm profile. Secrets include the Helm release records,
+# so access to all Secrets in this namespace is required by Helm's default
+# storage driver.
+k8s_helm_ci_manage_serviceaccounts: true
+k8s_helm_ci_manage_statefulsets: false
+k8s_helm_ci_manage_daemonsets: false
+k8s_helm_ci_manage_cronjobs: false
+k8s_helm_ci_manage_persistentvolumeclaims: false
+k8s_helm_ci_manage_horizontalpodautoscalers: false
+k8s_helm_ci_manage_poddisruptionbudgets: false
+k8s_helm_ci_manage_networkpolicies: false
+
+k8s_helm_ci_token_retries: 30
+k8s_helm_ci_token_delay: 2
+
+k8s_helm_ci_labels:
+  app.kubernetes.io/managed-by: homelab-helm-ci-access
+  app.kubernetes.io/instance: "{{ k8s_helm_ci_name }}"

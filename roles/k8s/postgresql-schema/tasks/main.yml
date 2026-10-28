@@ -305,6 +305,7 @@
                       limits:
                         cpu: 250m
                         memory: 128Mi
+      no_log: true
       diff: false
 
     - name: Wait until the PostgreSQL schema Job completes or fails

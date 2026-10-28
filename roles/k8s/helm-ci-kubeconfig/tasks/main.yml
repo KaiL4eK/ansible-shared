@@ -1,0 +1,204 @@
+---
+- name: Validate Helm CI kubeconfig inputs
+  ansible.builtin.assert:
+    that:
+      - k8s_helm_ci_name is match('^[a-z0-9]([a-z0-9-]{0,55}[a-z0-9])?$')
+      - k8s_helm_ci_name | length <= 57
+      - k8s_helm_ci_namespace is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+      - k8s_helm_ci_source_kubeconfig | length > 0
+      - k8s_helm_ci_output_path is match('^/')
+      - k8s_helm_ci_token_retries | int > 0
+      - k8s_helm_ci_token_delay | int > 0
+    fail_msg: >-
+      Provide a DNS-label CI name and namespace, an explicit source kubeconfig,
+      an absolute output path, and positive token wait settings.
+
+- name: Inspect source kubeconfig path without reading credentials
+  ansible.builtin.stat:
+    path: "{{ k8s_helm_ci_source_kubeconfig }}"
+  register: k8s_helm_ci_source_stat
+
+- name: Validate source and destination files
+  ansible.builtin.assert:
+    that:
+      - k8s_helm_ci_source_stat.stat.exists
+      - k8s_helm_ci_source_stat.stat.isreg
+      - (k8s_helm_ci_source_kubeconfig | realpath) != (k8s_helm_ci_output_path | realpath)
+    fail_msg: The source must be a regular kubeconfig distinct from the output path.
+
+- name: Read and validate source kubeconfig privately
+  no_log: true
+  diff: false
+  block:
+    - name: Parse the explicitly selected source kubeconfig
+      ansible.builtin.set_fact:
+        k8s_helm_ci_source: >-
+          {{ lookup('ansible.builtin.file', k8s_helm_ci_source_kubeconfig) | from_yaml }}
+
+    - name: Validate source context reference
+      ansible.builtin.assert:
+        that:
+          - k8s_helm_ci_source is mapping
+          - k8s_helm_ci_source.get('current-context', '') | length > 0
+          - >-
+            (k8s_helm_ci_source.get('contexts', [])
+             | selectattr('name', 'equalto', k8s_helm_ci_source.get('current-context', ''))
+             | list | length) == 1
+        fail_msg: The source kubeconfig must identify exactly one current context.
+
+    - name: Resolve the source context
+      ansible.builtin.set_fact:
+        k8s_helm_ci_source_context: >-
+          {{ (k8s_helm_ci_source.contexts
+              | selectattr('name', 'equalto', k8s_helm_ci_source['current-context'])
+              | map(attribute='context') | list | first) }}
+
+    - name: Validate selected source cluster reference
+      ansible.builtin.assert:
+        that:
+          - k8s_helm_ci_source_context.get('cluster', '') | length > 0
+          - >-
+            (k8s_helm_ci_source.get('clusters', [])
+             | selectattr('name', 'equalto', k8s_helm_ci_source_context.get('cluster', ''))
+             | list | length) == 1
+        fail_msg: The current source context must reference exactly one cluster.
+
+    - name: Resolve the source cluster
+      ansible.builtin.set_fact:
+        k8s_helm_ci_source_cluster: >-
+          {{ (k8s_helm_ci_source.clusters
+              | selectattr('name', 'equalto', k8s_helm_ci_source_context.cluster)
+              | map(attribute='cluster') | list | first) }}
+
+    - name: Require a verified HTTPS endpoint and embedded API CA
+      ansible.builtin.assert:
+        that:
+          - k8s_helm_ci_source_cluster.server is match('^https://')
+          - not k8s_helm_ci_source_cluster.get('insecure-skip-tls-verify', false)
+          - k8s_helm_ci_source_cluster.get('certificate-authority-data', '') | length > 0
+        fail_msg: The source kubeconfig must use HTTPS and embed a trusted API CA.
+
+- name: Render exact namespace-scoped Helm permissions
+  ansible.builtin.set_fact:
+    k8s_helm_ci_role_rules: >-
+      {{ lookup('ansible.builtin.template', role_path ~ '/templates/role-rules.yml.j2')
+         | from_yaml }}
+
+- name: Reconcile Helm CI identity and namespace-scoped RBAC
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ k8s_helm_ci_source_kubeconfig }}"
+      context: "{{ k8s_helm_ci_source['current-context'] }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ k8s_helm_ci_source_kubeconfig }}"
+      context: "{{ k8s_helm_ci_source['current-context'] }}"
+  block:
+    - name: Confirm the target namespace already exists
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ k8s_helm_ci_namespace }}"
+      register: k8s_helm_ci_namespace_info
+
+    - name: Refuse to issue credentials for a missing namespace
+      ansible.builtin.assert:
+        that:
+          - k8s_helm_ci_namespace_info.resources | length == 1
+        fail_msg: "Namespace {{ k8s_helm_ci_namespace }} must be created separately."
+
+    - name: Reconcile CI ServiceAccount without automatic token mounting
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: "{{ k8s_helm_ci_name }}"
+            namespace: "{{ k8s_helm_ci_namespace }}"
+            labels: "{{ k8s_helm_ci_labels }}"
+          automountServiceAccountToken: "{{ k8s_helm_ci_automount_service_account_token }}"
+
+    - name: Reconcile namespace-scoped Helm Role
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: "{{ k8s_helm_ci_name }}-helm"
+            namespace: "{{ k8s_helm_ci_namespace }}"
+            labels: "{{ k8s_helm_ci_labels }}"
+          rules: "{{ k8s_helm_ci_role_rules }}"
+
+    - name: Reconcile namespace-scoped RoleBinding
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: "{{ k8s_helm_ci_name }}-helm"
+            namespace: "{{ k8s_helm_ci_namespace }}"
+            labels: "{{ k8s_helm_ci_labels }}"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: "{{ k8s_helm_ci_name }}-helm"
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ k8s_helm_ci_name }}"
+              namespace: "{{ k8s_helm_ci_namespace }}"
+
+    - name: Issue kubeconfig only outside check mode
+      when: not ansible_check_mode
+      block:
+        - name: Ensure dedicated long-lived token Secret exists
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ k8s_helm_ci_name }}-token"
+                namespace: "{{ k8s_helm_ci_namespace }}"
+                labels: "{{ k8s_helm_ci_labels }}"
+                annotations:
+                  kubernetes.io/service-account.name: "{{ k8s_helm_ci_name }}"
+              type: kubernetes.io/service-account-token
+          no_log: true
+          diff: false
+
+        - name: Wait for the ServiceAccount token controller
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Secret
+            name: "{{ k8s_helm_ci_name }}-token"
+            namespace: "{{ k8s_helm_ci_namespace }}"
+          register: k8s_helm_ci_token_secret
+          until:
+            - k8s_helm_ci_token_secret.resources | length == 1
+            - k8s_helm_ci_token_secret.resources[0].get('data', {}).get('token', '') | length > 0
+          retries: "{{ k8s_helm_ci_token_retries }}"
+          delay: "{{ k8s_helm_ci_token_delay }}"
+          no_log: true
+          diff: false
+
+        - name: Ensure private kubeconfig directory exists
+          ansible.builtin.file:
+            path: "{{ k8s_helm_ci_output_path | dirname }}"
+            state: directory
+            mode: "0700"
+
+        - name: Write standalone Helm CI kubeconfig
+          ansible.builtin.template:
+            src: kubeconfig.yml.j2
+            dest: "{{ k8s_helm_ci_output_path }}"
+            mode: "0600"
+          no_log: true
+          diff: false
+
+- name: Report generated kubeconfig path
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Check mode: token issuance and kubeconfig writing were skipped.'
+         if ansible_check_mode else 'Generated kubeconfig: ' ~ k8s_helm_ci_output_path }}

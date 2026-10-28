@@ -65,12 +65,17 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   the parent project's `kubeconfigs/`; never discover fallback credentials in
   controller `~/.kube/config` or `/etc/kubernetes/`. The explicitly permitted
   managed-host destination `{{ hermes_kubeconfig_user_home }}/.kube/config`
-  is not a controller source. Keep selection and access generation in consumer
-  playbooks, not the shared role.
+  is not a controller source. Hermes kubeconfig selection and installation stay
+  in consumer playbooks and the copy-only `hermes/kubeconfig` role. CI access
+  generation is a separate responsibility of `k8s/helm-ci-kubeconfig`: consumers
+  select its explicit source and namespace/name/output inputs; the shared role
+  reconciles only a namespace-scoped ServiceAccount, Role, RoleBinding, token
+  Secret and generated kubeconfig.
 - Preserve the kubeconfig role's credential handling: directory `0700`, file
   `0600`, selected user/group ownership, no credential logs or diffs, replacement
   without merge or backups. Do not install kubectl, alter environment overrides,
-  generate credentials, call the Kubernetes API, or restart Hermes in this role.
+  generate credentials, call the Kubernetes API, or restart Hermes in the
+  `hermes/kubeconfig` role.
 
 ## Validation
 
