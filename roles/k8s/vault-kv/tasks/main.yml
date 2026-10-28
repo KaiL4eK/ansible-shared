@@ -5,14 +5,13 @@
 # только статусы и summary. Токен отзывается в always.
 - name: Evaluate role inputs without exposing credentials
   ansible.builtin.set_fact:
-    k8s_vault_kv_preflight:
+      k8s_vault_kv_preflight:
       VAULT_ADDR_https_or_loopback_http: >-
         {{ k8s_vault_kv_address is match('^https://[^ ]+$') or
            k8s_vault_kv_address is match('^http://(127\.0\.0\.1|localhost)(:[0-9]+)?$') }}
       VAULT_ROLE_ID_format: "{{ k8s_vault_kv_role_id is match('^[A-Za-z0-9_-]+$') }}"
       VAULT_SECRET_ID_nonempty: "{{ k8s_vault_kv_secret_id | length > 0 }}"
       records_present: "{{ k8s_vault_kv_records | length > 0 }}"
-  no_log: true
 
 - name: Validate role inputs
   ansible.builtin.assert:
@@ -156,23 +155,23 @@
           failed_when: false
           changed_when: true
 
-        - name: Reduce write results to sanitized statuses
-          ansible.builtin.set_fact:
-            k8s_vault_kv_statuses: >-
-              {{ (k8s_vault_kv_statuses | default([])) +
-                 [{'path': item.item.path, 'status': item.status | default(0), 'skipped': item.skipped | default(false)}] }}
-          loop: "{{ k8s_vault_kv_writes.results | default([]) }}"
-          loop_control:
-            label: "{{ item.item.path }}"
+    - name: Reduce write results to sanitized statuses
+      ansible.builtin.set_fact:
+        k8s_vault_kv_statuses: >-
+          {{ (k8s_vault_kv_statuses | default([])) +
+             [{'path': item.item.path, 'status': item.status | default(0), 'skipped': item.skipped | default(false)}] }}
+      loop: "{{ k8s_vault_kv_writes.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.path }}"
 
-        - name: Reduce the plan to a sanitized summary
-          ansible.builtin.set_fact:
-            k8s_vault_kv_summary: >-
-              {{ (k8s_vault_kv_summary | default([])) +
-                 [{'path': item.path, 'action': item.action, 'changed_fields': item.changed_fields}] }}
-          loop: "{{ k8s_vault_kv_plan }}"
-          loop_control:
-            label: "{{ item.path }}"
+    - name: Reduce the plan to a sanitized summary
+      ansible.builtin.set_fact:
+        k8s_vault_kv_summary: >-
+          {{ (k8s_vault_kv_summary | default([])) +
+             [{'path': item.path, 'action': item.action, 'changed_fields': item.changed_fields}] }}
+      loop: "{{ k8s_vault_kv_plan }}"
+      loop_control:
+        label: "{{ item.path }}"
 
   always:
     - name: Revoke the temporary Vault token
