@@ -33,12 +33,13 @@ roles:
   - hermes/agent_todoist_mcp
 ```
 
-For `ansible/playbooks/hermes/vova-hermes.yml`, supply
-`vault_hermes_vova_todoist_api_key` from an external vaulted vars file or
-inventory. For example, run from `ansible/`:
+Consumer playbooks live in the consumer repository, for example
+`ansible/playbooks/hermes/<name>/hermes.yml`. The playbook maps the role input
+to a vaulted variable and supplies it from an external vaulted vars file or
+inventory:
 
 ```bash
-pdm run ansible-playbook playbooks/hermes/vova-hermes.yml --extra-vars @/secure/vova-secrets.yml
+ansible-playbook playbooks/hermes/<name>/hermes.yml --extra-vars @<vaulted-vars>.yml
 ```
 
-The vaulted vars file must define `vault_hermes_vova_todoist_api_key`.
+The vaulted vars file must define the vaulted variable used in the mapping.
