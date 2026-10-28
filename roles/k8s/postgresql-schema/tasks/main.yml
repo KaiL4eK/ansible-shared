@@ -149,6 +149,7 @@
   delay: 5
   when: k8s_postgresql_schema_user_secret_name | length > 0
   no_log: true
+  diff: false
 
 - name: Wait for the referenced secret_env Secrets and required keys
   vars:
@@ -173,6 +174,7 @@
       | map(attribute='value') | map('b64decode') | reject('equalto', '')
       | list | length == 1
   no_log: true
+  diff: false
 
 - name: Apply PostgreSQL schema
   block:
@@ -261,7 +263,7 @@
               {'name': 'PGSSLMODE', 'value': k8s_postgresql_schema_sslmode}]
              + [{'name': 'PGUSER'} | combine(k8s_postgresql_schema_pguser)]
              + [{'name': 'PGPASSWORD'} | combine(k8s_postgresql_schema_pgpassword)]
-             + k8s_postgresql_schema_env_extra }}
+             + (k8s_postgresql_schema_env_extra | default([])) }}
       kubernetes.core.k8s:
         state: present
         force: true
@@ -303,7 +305,6 @@
                       limits:
                         cpu: 250m
                         memory: 128Mi
-      no_log: true
       diff: false
 
     - name: Wait until the PostgreSQL schema Job completes or fails

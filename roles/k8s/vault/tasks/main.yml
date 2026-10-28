@@ -223,6 +223,7 @@
       register: k8s_vault_init_raw
       changed_when: true
       no_log: true
+      diff: false
 
     # vault operator init -format=json возвращает unseal_keys_b64/
     # unseal_keys_hex/root_token; поле keys есть только в сыром API-ответе.
@@ -234,6 +235,7 @@
           unseal_keys_b64: "{{ (k8s_vault_init_raw.stdout | from_json).unseal_keys_b64 }}"
           root_token: "{{ (k8s_vault_init_raw.stdout | from_json).root_token }}"
       no_log: true
+      diff: false
 
     - name: Проверить состав результата инициализации
       when: not k8s_vault_state.initialized
@@ -246,6 +248,7 @@
           (rc={{ k8s_vault_init_raw.rc | default(-1) }}); проверьте формат
           вывода CLI Vault {{ k8s_vault_image_tag }}.
       no_log: true
+      diff: false
 
     - name: Сформировать содержимое Secret с unseal ключами
       when: not k8s_vault_state.initialized
@@ -256,6 +259,7 @@
                         k8s_vault_init_data.unseal_keys_b64[item | int] | b64encode}) }}
       loop: "{{ range(k8s_vault_unseal_key_shares | int) | list }}"
       no_log: true
+      diff: false
 
     - name: Дополнить содержимое Secret root token
       when: not k8s_vault_state.initialized
@@ -264,6 +268,7 @@
           {{ k8s_vault_unseal_secret_data
              | combine({'root-token': k8s_vault_init_data.root_token | b64encode}) }}
       no_log: true
+      diff: false
 
     - name: Сохранить unseal ключи и root token в Secret
       when: not k8s_vault_state.initialized
@@ -292,6 +297,7 @@
       failed_when: false
       changed_when: true
       no_log: true
+      diff: false
 
     - name: Прочитать unseal ключи из Secret
       when:
@@ -304,6 +310,7 @@
         name: "{{ k8s_vault_unseal_secret_name }}"
       register: k8s_vault_unseal_secret
       no_log: true
+      diff: false
 
     - name: Проверить наличие unseal ключей в Secret
       when:
@@ -330,6 +337,7 @@
              | selectattr('key', 'match', '^unseal-key-')
              | map(attribute='value') | map('b64decode') | list }}
       no_log: true
+      diff: false
 
     - name: Распечатать Vault ключами из Secret
       when:
@@ -343,6 +351,7 @@
       failed_when: false
       changed_when: true
       no_log: true
+      diff: false
 
     - name: Проверить итоговое состояние Vault
       when: not k8s_vault_state.initialized or k8s_vault_state.sealed
