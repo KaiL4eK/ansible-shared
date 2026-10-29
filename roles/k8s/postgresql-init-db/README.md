@@ -20,14 +20,23 @@ Username администратора в этом режиме приходит 
 всё равно читается из Secret (`k8s_postgresql_init_admin_secret_key`) и не
 попадает в Job spec.
 
-При `k8s_postgresql_init_manage_credentials: true` плейбук передаёт
-`k8s_postgresql_init_admin_user`, `k8s_postgresql_init_admin_password`,
-`k8s_postgresql_init_user` и `k8s_postgresql_init_password` из своего Vault.
-Роль сама проверяет входы и существование namespace, создаёт уникальный временный
-Secret и Job, ждёт результат и удаляет Secret в `always`, в том числе при ошибке.
+При `k8s_postgresql_init_manage_credentials: true` плейбук передаёт креды
+юзера (`k8s_postgresql_init_user`, `k8s_postgresql_init_password`) и ровно
+один источник пароля администратора: inline `k8s_postgresql_init_admin_password`
+либо готовый админ-Secret `k8s_postgresql_init_admin_secret_name` с ключом
+`k8s_postgresql_init_admin_secret_key` (пример — штатный чарт-Secret bitnami
+с ключом `postgres-password`, где username администратора задаётся inline
+`k8s_postgresql_init_admin_user` или ключом `k8s_postgresql_init_admin_username_key`).
+Роль preflight'ит внешний админ-Secret, проверяет входы и существование
+namespace, создаёт уникальный временный Secret (креды юзера всегда; админ —
+только при inline-пароле: значение внешнего Secret'а не копируется, Job
+ссылается на него через secretKeyRef), ждёт результат и удаляет временный
+Secret в `always`, в том числе при ошибке.
 Параметр `k8s_postgresql_init_job_name` служит префиксом (до 34 символов);
 фактическое имя генерируется сервером и уникально для каждого запуска.
-Имена готовых Secrets в этом режиме передавать нельзя. Check mode отклоняется.
+Имя готового user-Secret'а в этом режиме передавать нельзя — креды юзера
+только role-managed; внешний админ-Secret — единственный разрешённый внешний
+вход (гибрид). Check mode отклоняется.
 Необязательный `k8s_postgresql_init_kubeconfig` позволяет проверить наличие явно
 выбранного файла без чтения; подключение использует стандартные `K8S_AUTH_*`.
 

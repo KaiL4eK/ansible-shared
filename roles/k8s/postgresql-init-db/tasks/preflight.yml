@@ -4,16 +4,19 @@
 # Непустые значения отсекают Secret'ы, синхронизировавшиеся раньше содержимого.
 - name: Wait for the referenced credential Secrets and required keys
   vars:
-    k8s_postgresql_init_preflight_secrets:
-      - name: "{{ k8s_postgresql_init_admin_secret_name }}"
-        keys: >-
-          {{ [k8s_postgresql_init_admin_secret_key]
-             + ([k8s_postgresql_init_admin_username_key]
-                if k8s_postgresql_init_admin_username_key | length > 0 else []) }}
-      - name: "{{ k8s_postgresql_init_user_secret_name }}"
-        keys:
-          - "{{ k8s_postgresql_init_user_username_key }}"
-          - "{{ k8s_postgresql_init_user_secret_key }}"
+    # Managed-режим (credentials) включает в список только внешний админ-Secret
+    # гибрида: креды юзера там role-managed, готового user-Secret'а нет.
+    k8s_postgresql_init_preflight_secrets: >-
+      {{ ([{'name': k8s_postgresql_init_admin_secret_name,
+            'keys': [k8s_postgresql_init_admin_secret_key]
+                    + ([k8s_postgresql_init_admin_username_key]
+                       if k8s_postgresql_init_admin_username_key | length > 0
+                       else [])}]
+         if k8s_postgresql_init_admin_secret_name | length > 0 else [])
+        + ([{'name': k8s_postgresql_init_user_secret_name,
+             'keys': [k8s_postgresql_init_user_username_key,
+                      k8s_postgresql_init_user_secret_key]}]
+         if k8s_postgresql_init_user_secret_name | length > 0 else []) }}
   kubernetes.core.k8s_info:
     api_version: v1
     kind: Secret
