@@ -11,8 +11,10 @@
       - hermes_webui_repository_url is match('^https://')
       - hermes_webui_repository_revision is match('^[0-9a-f]{40}$')
       - hermes_webui_install_directory is match('^/')
-      - hermes_webui_image_name | length > 0
-      - hermes_webui_container_name | length > 0
+      - hermes_webui_venv_directory is match('^/')
+      - hermes_webui_environment_file is match('^/')
+      - hermes_webui_systemd_unit is match('^/')
+      - hermes_webui_service_name | length > 0
       - hermes_webui_port | int > 0
       - hermes_webui_port | int <= 65535
       - hermes_webui_allowed_origin is match('^https://')
@@ -56,13 +58,7 @@
       Hermes Agent source is missing. Run playbooks/hermes/agent.yml before
       installing Hermes WebUI.
 
-- name: Install Docker SDK for Ansible Docker modules
-  ansible.builtin.package:
-    name: python3-docker
-    state: present
-  become: true
-
-- name: Ensure Hermes WebUI build and data directories exist
+- name: Ensure Hermes WebUI source, environment and data directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -71,6 +67,8 @@
     mode: "{{ item.mode }}"
   loop:
     - path: "{{ hermes_webui_install_directory }}"
+      mode: "0755"
+    - path: "{{ hermes_webui_venv_directory }}"
       mode: "0755"
     - path: "{{ hermes_webui_workspace_directory }}"
       mode: "0750"
@@ -91,63 +89,85 @@
   become: true
   become_user: "{{ hermes_webui_user }}"
 
-- name: Read Hermes UID for Docker bind-mount ownership
+- name: Create isolated Hermes WebUI Python environment
   ansible.builtin.command:
     argv:
-      - id
-      - -u
-      - "{{ hermes_webui_user }}"
-  register: hermes_webui_uid
-  changed_when: false
+      - uv
+      - venv
+      - --python
+      - "{{ hermes_webui_python_version }}"
+      - "{{ hermes_webui_venv_directory }}"
+  args:
+    creates: "{{ hermes_webui_venv_directory }}/bin/python"
+  become: true
+  become_user: "{{ hermes_webui_user }}"
 
-- name: Read Hermes primary GID for Docker bind-mount ownership
+- name: Install pinned Hermes WebUI Python dependencies
   ansible.builtin.command:
     argv:
-      - id
-      - -g
-      - "{{ hermes_webui_user }}"
-  register: hermes_webui_gid
-  changed_when: false
-
-- name: Build the pinned Hermes WebUI container image
-  community.docker.docker_image_build:
-    name: "{{ hermes_webui_image_name }}"
-    path: "{{ hermes_webui_install_directory }}"
-    dockerfile: Dockerfile
-    outputs:
-      - type: docker
+      - uv
+      - pip
+      - install
+      - --python
+      - "{{ hermes_webui_venv_directory }}/bin/python"
+      - -r
+      - "{{ hermes_webui_install_directory }}/requirements.txt"
+  register: hermes_webui_dependencies
+  changed_when: "'Installed' in hermes_webui_dependencies.stdout or 'Uninstalled' in hermes_webui_dependencies.stdout"
   become: true
+  become_user: "{{ hermes_webui_user }}"
 
-- name: Start Hermes WebUI container
-  community.docker.docker_container:
-    name: "{{ hermes_webui_container_name }}"
-    image: "{{ hermes_webui_image_name }}"
-    state: started
-    restart_policy: unless-stopped
-    pull: never
-    published_ports:
-      - "{{ hermes_webui_port }}:8787/tcp"
-    volumes:
-      - "{{ hermes_webui_home }}:/home/hermeswebui/.hermes"
-      - "{{ hermes_webui_workspace_directory }}:/workspace"
-    env:
-      WANTED_UID: "{{ hermes_webui_uid.stdout }}"
-      WANTED_GID: "{{ hermes_webui_gid.stdout }}"
-      HERMES_HOME: /home/hermeswebui/.hermes
-      HERMES_CONFIG_PATH: /home/hermeswebui/.hermes/config.yaml
-      HERMES_WEBUI_AGENT_DIR: /home/hermeswebui/.hermes/hermes-agent
-      HERMES_WEBUI_HOST: 0.0.0.0
-      HERMES_WEBUI_PORT: "8787"
-      HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
-      HERMES_WEBUI_DEFAULT_WORKSPACE: /workspace
-      HERMES_WEBUI_PASSWORD: "{{ hermes_webui_password }}"
-      HERMES_WEBUI_ALLOWED_ORIGINS: "{{ hermes_webui_allowed_origin }}"
-      HERMES_WEBUI_SECURE: "1"
-    comparisons:
-      '*': strict
-  become: true
+- name: Configure Hermes WebUI runtime environment privately
+  ansible.builtin.template:
+    src: hermes-webui.env.j2
+    dest: "{{ hermes_webui_environment_file }}"
+    owner: root
+    group: "{{ hermes_webui_group }}"
+    mode: "0640"
   no_log: true
   diff: false
+  become: true
+  notify: Restart Hermes WebUI
+
+- name: Install Hermes WebUI systemd unit
+  ansible.builtin.template:
+    src: hermes-webui.service.j2
+    dest: "{{ hermes_webui_systemd_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Hermes WebUI
+  become: true
+
+- name: Install Hermes WebUI launcher
+  ansible.builtin.template:
+    src: run_webui.py.j2
+    dest: "{{ hermes_webui_install_directory }}/run_webui.py"
+    owner: "{{ hermes_webui_user }}"
+    group: "{{ hermes_webui_group }}"
+    mode: "0750"
+  notify: Restart Hermes WebUI
+  become: true
+  become_user: "{{ hermes_webui_user }}"
+
+- name: Remove previous Hermes WebUI container after systemd configuration
+  community.docker.docker_container:
+    name: hermes-webui
+    state: absent
+  become: true
+  when: not ansible_check_mode
+
+- name: Enable and start Hermes WebUI service
+  ansible.builtin.systemd_service:
+    name: "{{ hermes_webui_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Apply pending Hermes WebUI restarts before health verification
+  ansible.builtin.meta: flush_handlers
   when: not ansible_check_mode
 
 - name: Wait for Hermes WebUI health endpoint
@@ -165,36 +185,12 @@
   failed_when: false
   when: not ansible_check_mode
 
-- name: Read Hermes WebUI container state after health check
-  community.docker.docker_container_info:
-    name: "{{ hermes_webui_container_name }}"
-  register: hermes_webui_container_info
-  no_log: true
-  diff: false
-  when:
-    - not ansible_check_mode
-    - hermes_webui_health.status | default(0) != 200
-
-- name: Reduce Hermes WebUI container state to safe diagnostic fields
-  ansible.builtin.set_fact:
-    hermes_webui_container_state_summary:
-      exists: "{{ hermes_webui_container_info.exists | default(false) }}"
-      status: "{{ hermes_webui_container_info.container.State.Status | default('unknown') }}"
-      health: "{{ hermes_webui_container_info.container.State.Health.Status | default('unavailable') }}"
-      exit_code: "{{ hermes_webui_container_info.container.State.ExitCode | default('unknown') }}"
-  no_log: true
-  diff: false
-  when:
-    - not ansible_check_mode
-    - hermes_webui_health.status | default(0) != 200
-
 - name: Require Hermes WebUI health endpoint to return HTTP 200
   ansible.builtin.assert:
     that:
       - hermes_webui_health.status | default(0) == 200
     fail_msg: >-
       Hermes WebUI did not return HTTP 200 from /health after
-      {{ hermes_webui_health_retries }} attempts. Container state:
-      {{ hermes_webui_container_state_summary | default({'status': 'not checked'}) }}.
-      Check startup output on the Hermes VM; startup dependencies may still be installing.
+      {{ hermes_webui_health_retries }} attempts. Check the hermes-webui systemd
+      service journal on the Hermes VM.
   when: not ansible_check_mode

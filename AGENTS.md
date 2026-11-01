@@ -14,12 +14,13 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   `hermes_kubeconfig_source` (required absolute path), `hermes_kubeconfig_user`
   (`hermes`), `hermes_kubeconfig_group` (defaults to that user), and
   `hermes_kubeconfig_user_home` (`/home/<user>`).
-- `roles/hermes/webui/` builds a pinned Hermes WebUI Docker image and runs it
-  beside an existing Hermes Agent with persistent bind mounts. It consumes
-  explicit paths, HTTPS origin and password inputs; deployment-specific Vault
-  loading stays in the consumer playbook. It manages the container deployment,
-  not migration from a prior systemd installation. Inputs and behavior are
-  documented in the role's `README.md`.
+- `roles/hermes/webui/` installs pinned Hermes WebUI source/dependencies in a
+  dedicated Python venv and runs it as a systemd service beside an existing
+  Hermes Agent in the same host environment. It consumes explicit paths, HTTPS
+  origin and password inputs; deployment-specific Vault loading stays in the
+  consumer playbook. It removes the superseded WebUI container while preserving
+  Docker Engine for other workloads. Inputs and behavior are documented in the
+  role's `README.md`.
 
 ## Working Rules
 

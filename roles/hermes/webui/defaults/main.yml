@@ -9,8 +9,11 @@ hermes_webui_workspace_directory: "{{ hermes_webui_user_home }}/workspace"
 hermes_webui_repository_url: https://github.com/nesquena/hermes-webui.git
 hermes_webui_repository_revision: ed223bf111a33de57d41c88278bc7dbcef162636
 hermes_webui_install_directory: "{{ hermes_webui_user_home }}/hermes-webui"
-hermes_webui_image_name: "localhost/hermes-webui:{{ hermes_webui_repository_revision }}"
-hermes_webui_container_name: hermes-webui
+hermes_webui_venv_directory: "{{ hermes_webui_install_directory }}/.venv"
+hermes_webui_environment_file: /etc/hermes-webui.env
+hermes_webui_systemd_unit: /etc/systemd/system/hermes-webui.service
+hermes_webui_service_name: hermes-webui
+hermes_webui_python_version: "3.12"
 hermes_webui_port: 8787
 hermes_webui_password: ""
 hermes_webui_password_min_length: 16
@@ -19,3 +22,4 @@ hermes_webui_state_directory: "{{ hermes_webui_home }}/webui"
 hermes_webui_health_retries: 30
 hermes_webui_health_delay: 10
 hermes_webui_health_timeout: 5
+hermes_webui_host: 0.0.0.0

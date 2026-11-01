@@ -1,14 +1,15 @@
 # Hermes WebUI role
 
-Builds the pinned upstream Hermes WebUI Docker image on the managed host and
-runs it beside an existing Hermes Agent. The container bind-mounts the existing
-`.hermes` directory and workspace, so configuration, credentials, Agent source,
-and WebUI state remain on the Hermes VM. The container creates its own Python
-environment; it does not use or alter the host Agent virtual environment.
+Checks out the pinned upstream Hermes WebUI source and runs it as a systemd
+service beside the existing Hermes Agent. Its launcher and WebUI requirements
+use a dedicated Python 3.12 virtual environment; the pinned upstream bootstrap
+selects the Hermes Agent interpreter for the long-running server. The service
+runs as the Hermes user on the VM, using the same HOME, `.hermes`, shared skills,
+workspace, configuration, credentials and host tools as the Agent.
 
 The role does not install Docker Engine, configure Kubernetes publication, or
-load Vault. A consumer must install Docker Engine and explicitly pass deployment
-paths, HTTPS origin and password.
+load Vault. A consumer explicitly passes deployment paths, HTTPS origin and
+password.
 
 ## Inputs
 
@@ -22,8 +23,11 @@ paths, HTTPS origin and password.
 | `hermes_webui_repository_url` | upstream repository | WebUI Git repository |
 | `hermes_webui_repository_revision` | pinned 40-character commit | WebUI source revision and image tag |
 | `hermes_webui_install_directory` | `<user-home>/hermes-webui` | Build context checkout path |
-| `hermes_webui_image_name` | `localhost/hermes-webui:<revision>` | Locally built image |
-| `hermes_webui_container_name` | `hermes-webui` | Docker container name |
+| `hermes_webui_venv_directory` | `<install-dir>/.venv` | Isolated WebUI Python dependencies |
+| `hermes_webui_python_version` | `3.12` | Python runtime for the WebUI environment |
+| `hermes_webui_environment_file` | `/etc/hermes-webui.env` | Root-owned protected runtime environment file |
+| `hermes_webui_systemd_unit` | `/etc/systemd/system/hermes-webui.service` | Service unit path |
+| `hermes_webui_service_name` | `hermes-webui` | systemd service name |
 | `hermes_webui_port` | `8787` | Guest listen port |
 | `hermes_webui_password` | empty (required) | Built-in login password |
 | `hermes_webui_password_min_length` | `16` | Minimum password length |
@@ -32,15 +36,14 @@ paths, HTTPS origin and password.
 | `hermes_webui_health_retries` / `hermes_webui_health_delay` | `30` / `10` seconds | Bounded health polling (5 minutes maximum) |
 | `hermes_webui_health_timeout` | `5` seconds | Per-request health-check timeout |
 
-The role installs the Docker SDK, checks out the pinned source, builds the image
-and starts it with `unless-stopped`. It manages only the container deployment;
-it does not manage prior WebUI installations. It passes the managed user's
-numeric UID/GID so upstream container initialization preserves host file
-ownership. The container task and password validation use `no_log`/`diff: false`.
-On first startup, the upstream entrypoint installs Agent dependencies into the
-container's separate Python environment. The health check polls for at most five
-minutes with a short request timeout and reports safe container state if startup
-does not finish.
+The role creates a dedicated venv and installs `requirements.txt`, then starts
+the upstream `bootstrap.py --foreground --skip-agent-install` under systemd.
+The password is stored in a root-owned, Hermes-group-readable mode-0640
+EnvironmentFile; template output and diffs are hidden. Deployment stops/removes
+the former `hermes-webui` Docker container after preparing the service, avoiding
+a port conflict. Docker Engine itself is not removed because it may serve other
+workloads. The health check polls for at most five minutes with a short request
+timeout and reports safe status if startup does not finish.
 
 Run HomeLab lint and syntax checks from `ansible/`; the role is resolved through
 that consumer's `roles_path`.

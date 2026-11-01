@@ -1,0 +1,29 @@
+[Unit]
+Description=Hermes WebUI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ hermes_webui_user }}
+Group={{ hermes_webui_group }}
+WorkingDirectory={{ hermes_webui_install_directory }}
+Environment=HOME={{ hermes_webui_user_home }}
+Environment=HERMES_HOME={{ hermes_webui_home }}
+Environment=HERMES_CONFIG_PATH={{ hermes_webui_home }}/config.yaml
+Environment=HERMES_WEBUI_AGENT_DIR={{ hermes_webui_agent_install_directory }}
+Environment=HERMES_WEBUI_HOST={{ hermes_webui_host }}
+Environment=HERMES_WEBUI_PORT={{ hermes_webui_port }}
+Environment=HERMES_WEBUI_STATE_DIR={{ hermes_webui_state_directory }}
+Environment=HERMES_WEBUI_DEFAULT_WORKSPACE={{ hermes_webui_workspace_directory }}
+Environment=HERMES_WEBUI_ALLOWED_ORIGINS={{ hermes_webui_allowed_origin }}
+Environment=HERMES_WEBUI_SECURE=1
+ExecStart={{ hermes_webui_venv_directory }}/bin/python {{ hermes_webui_install_directory }}/run_webui.py
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
