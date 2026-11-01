@@ -17,7 +17,7 @@
     apply: true
 
 # Удаляет манифесты по digest через API реестра (требует storage.delete.enabled
-# на Helm-релизе docker-registry). Место освобождает garbage-collect чарта.
+# на Helm-релизе docker-registry). Blobs физически удаляет docker-registry-gc.
 - name: Создать CronJob чистки реестра
   kubernetes.core.k8s:
     definition:
@@ -30,11 +30,15 @@
           app: "{{ k8s_docker_registry_cleanup_name }}"
       spec:
         schedule: "{{ k8s_docker_registry_cleanup_schedule }}"
+        timeZone: "{{ k8s_docker_registry_cleanup_time_zone }}"
         concurrencyPolicy: Forbid
         startingDeadlineSeconds: "{{ k8s_docker_registry_cleanup_starting_deadline_seconds }}"
         successfulJobsHistoryLimit: "{{ k8s_docker_registry_cleanup_successful_jobs_history_limit }}"
         failedJobsHistoryLimit: "{{ k8s_docker_registry_cleanup_failed_jobs_history_limit }}"
         jobTemplate:
+          metadata:
+            labels:
+              app: "{{ k8s_docker_registry_cleanup_name }}"
           spec:
             backoffLimit: "{{ k8s_docker_registry_cleanup_backoff_limit }}"
             activeDeadlineSeconds: "{{ k8s_docker_registry_cleanup_active_deadline_seconds }}"

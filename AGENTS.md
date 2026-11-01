@@ -14,6 +14,12 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   `hermes_kubeconfig_source` (required absolute path), `hermes_kubeconfig_user`
   (`hermes`), `hermes_kubeconfig_group` (defaults to that user), and
   `hermes_kubeconfig_user_home` (`/home/<user>`).
+- `roles/hermes/webui/` builds a pinned Hermes WebUI Docker image and runs it
+  beside an existing Hermes Agent with persistent bind mounts. It consumes
+  explicit paths, HTTPS origin and password inputs; deployment-specific Vault
+  loading stays in the consumer playbook. It manages the container deployment,
+  not migration from a prior systemd installation. Inputs and behavior are
+  documented in the role's `README.md`.
 
 ## Working Rules
 
@@ -65,6 +71,10 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
 - `no_log: true` и `diff: false` ставить на конкретные задачи с credential-значениями, Secret-данными или аутентифицированными запросами. Публичные проверки параметров, безопасные статусы и sanitized-результаты оставлять видимыми; разделять смешанные проверки, а не применять `no_log` ко всей роли/include/block.
 - Имена ролей внутри домена пишутся через дефис (`k8s/postgresql-init-db`, `k8s/postgresql-schema`), не через подчёркивание. Если контракта роли не хватает consumer'у (пример — секретные значения в SQL через psql `\getenv`), расширять роль (у `k8s/postgresql-schema` — `k8s_postgresql_schema_secret_env`), а не дублировать Job-оркестрацию в плейбуке.
 - Keep deployment-specific values outside roles and pass them in explicitly from the consumer.
+- Do not add legacy-install cleanup, migration or transfer behavior to a steady-state
+  role/playbook by default. First clarify with the user whether migration support
+  is needed; when required, prefer a separate one-shot playbook and role only if
+  the workflow warrants it.
 - Keep external dependencies declared in `requirements.yml`.
 - Do not add environment-specific playbooks, inventory, or vault content here.
 - For HomeLab consumers, controller-side kubeconfig sources must come only from

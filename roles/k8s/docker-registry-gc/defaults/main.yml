@@ -1,0 +1,34 @@
+---
+k8s_docker_registry_gc_namespace: ""
+k8s_docker_registry_gc_name: docker-registry-gc
+k8s_docker_registry_gc_service_account_name: docker-registry-gc
+k8s_docker_registry_gc_schedule: "0 1 * * *"
+k8s_docker_registry_gc_time_zone: Etc/UTC
+
+k8s_docker_registry_gc_cleanup_job_selector: ""
+k8s_docker_registry_gc_cleanup_wait_timeout_seconds: 5400
+
+k8s_docker_registry_gc_deployment_name: docker-registry
+k8s_docker_registry_gc_container_name: docker-registry
+k8s_docker_registry_gc_binary: /bin/registry
+k8s_docker_registry_gc_config_path: /etc/distribution/config.yml
+k8s_docker_registry_gc_delete_untagged: true
+k8s_docker_registry_gc_rollout_timeout: 10m
+
+# Tested Bitnami kubectl v1.37.2 image, pinned by digest; keep within one minor of the API server.
+k8s_docker_registry_gc_image: bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+k8s_docker_registry_gc_image_pull_policy: IfNotPresent
+k8s_docker_registry_gc_starting_deadline_seconds: 900
+k8s_docker_registry_gc_active_deadline_seconds: 10800
+k8s_docker_registry_gc_termination_grace_period_seconds: 660
+k8s_docker_registry_gc_backoff_limit: 1
+k8s_docker_registry_gc_successful_jobs_history_limit: 3
+k8s_docker_registry_gc_failed_jobs_history_limit: 3
+
+k8s_docker_registry_gc_resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

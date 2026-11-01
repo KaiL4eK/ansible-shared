@@ -131,7 +131,18 @@ Before working with this repository, install Ansible dependencies:
   (`keep_tags` — вечные теги, `keep_tag_patterns` — всегда защищаемые regex,
   `keep_min_per_repo`, `keep_days`), dry-run и лимиты Job. Обязательные входы
   проверяет `tasks/validate_inputs.yml`; его можно прогонять скретч-плейбуком
-  отдельно от основной логики роли.
+  отдельно от основной логики роли. `time_zone` задаёт часовой пояс CronJob.
+- `roles/k8s/docker-registry-gc/` — координированный CronJob garbage collection
+  Docker Distribution: дожидается окончания выбранных cleanup Jobs, временно
+  включает `REGISTRY_STORAGE_MAINTENANCE_READONLY_ENABLED`, ожидает rollout,
+  запускает `/bin/registry garbage-collect` через `pods/exec` и в `EXIT` trap
+  снимает read-only с ожиданием второго rollout. Роль создаёт namespace-scoped
+  ServiceAccount, Role/RoleBinding, ConfigMap скрипта и CronJob; для установки и
+  последующей сверки нужны права на управление RBAC. Role разрешает только чтение
+  Deployments/Pods/Jobs, patch Deployments и `create` на `pods/exec` в выбранной
+  namespace. Входы с префиксом `k8s_docker_registry_gc_` задают namespace,
+  schedule/time zone, cleanup Job selector, Deployment/container, образ kubectl,
+  таймауты и флаг удаления untagged manifests.
 - `roles/hermes/agent_init/` installs and configures a Hermes Agent user
   service.
 - `roles/hermes/agent_env/` manages explicit Hermes environment values in the
@@ -152,6 +163,10 @@ Before working with this repository, install Ansible dependencies:
   backup repository without overwriting existing data.
 - `roles/hermes/kubeconfig/` installs an explicitly selected kubeconfig for an
   existing Hermes user without generating cluster credentials.
+- `roles/hermes/webui/` installs a pinned Hermes WebUI checkout as a systemd
+  service beside an existing Hermes Agent. Its caller provides the existing
+  Agent paths, HTTPS origin, and login password; Vault wiring and environment-
+  specific network settings remain in the consumer playbook.
 - `roles/nodejs/runtime/` installs Node.js and npm from NodeSource on Debian
   and Ubuntu hosts.
 - `roles/llm/llama-cpp/` deploys a llama.cpp server with Docker Compose,

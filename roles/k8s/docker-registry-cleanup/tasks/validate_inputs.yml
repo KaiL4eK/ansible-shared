@@ -29,4 +29,6 @@
       - k8s_docker_registry_cleanup_empty_inputs | length == 0
     fail_msg: >-
       Пустые обязательные входы роли (заполняет плейбук): {{ k8s_docker_registry_cleanup_empty_inputs | join(', ') }}
-    success_msg: "Обязательные входы роли заполнены ({{ k8s_docker_registry_cleanup_mandatory_inputs | length }} параметров)"
+    success_msg: >-
+      Обязательные входы роли заполнены
+      ({{ k8s_docker_registry_cleanup_mandatory_inputs | length }} параметров)

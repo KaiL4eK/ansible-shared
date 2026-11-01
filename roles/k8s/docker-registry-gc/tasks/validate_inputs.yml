@@ -1,0 +1,21 @@
+---
+- name: Build the required registry garbage-collection input map
+  ansible.builtin.set_fact:
+    k8s_docker_registry_gc_mandatory_inputs:
+      k8s_docker_registry_gc_namespace: "{{ k8s_docker_registry_gc_namespace }}"
+      k8s_docker_registry_gc_cleanup_job_selector: "{{ k8s_docker_registry_gc_cleanup_job_selector }}"
+
+- name: Collect empty required registry garbage-collection inputs
+  ansible.builtin.set_fact:
+    k8s_docker_registry_gc_empty_inputs: >-
+      {{ k8s_docker_registry_gc_mandatory_inputs | dict2items
+         | selectattr('value', 'equalto', '')
+         | map(attribute='key') | list }}
+
+- name: Assert required registry garbage-collection inputs are set
+  ansible.builtin.assert:
+    that:
+      - k8s_docker_registry_gc_empty_inputs | length == 0
+    fail_msg: >-
+      Required inputs are empty: {{ k8s_docker_registry_gc_empty_inputs | join(', ') }}.
+      Supply them from the consumer playbook.

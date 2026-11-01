@@ -1,0 +1,184 @@
+---
+- name: Validate required registry garbage-collection inputs
+  ansible.builtin.include_tasks: validate_inputs.yml
+
+- name: Create namespace-scoped registry garbage-collection Role
+  kubernetes.core.k8s:
+    apply: true
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: "{{ k8s_docker_registry_gc_name }}"
+        namespace: "{{ k8s_docker_registry_gc_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+      rules:
+        - apiGroups:
+            - apps
+          resources:
+            - deployments
+          verbs:
+            - get
+            - list
+            - watch
+            - patch
+        - apiGroups:
+            - ""
+          resources:
+            - pods
+          verbs:
+            - get
+            - list
+        - apiGroups:
+            - ""
+          resources:
+            - pods/exec
+          verbs:
+            - create
+        - apiGroups:
+            - batch
+          resources:
+            - jobs
+          verbs:
+            - get
+            - list
+
+- name: Bind registry garbage-collection Role to its ServiceAccount
+  kubernetes.core.k8s:
+    apply: true
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: "{{ k8s_docker_registry_gc_name }}"
+        namespace: "{{ k8s_docker_registry_gc_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: "{{ k8s_docker_registry_gc_name }}"
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ k8s_docker_registry_gc_service_account_name }}"
+          namespace: "{{ k8s_docker_registry_gc_namespace }}"
+
+- name: Create registry garbage-collection ServiceAccount
+  kubernetes.core.k8s:
+    apply: true
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ k8s_docker_registry_gc_service_account_name }}"
+        namespace: "{{ k8s_docker_registry_gc_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+      automountServiceAccountToken: true
+
+- name: Create ConfigMap with the coordinated registry garbage-collection script
+  kubernetes.core.k8s:
+    apply: true
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ k8s_docker_registry_gc_name }}-script"
+        namespace: "{{ k8s_docker_registry_gc_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+      data:
+        registry_gc.sh: "{{ lookup('ansible.builtin.file', 'registry_gc.sh') }}"
+
+- name: Create coordinated registry garbage-collection CronJob
+  kubernetes.core.k8s:
+    apply: true
+    definition:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: "{{ k8s_docker_registry_gc_name }}"
+        namespace: "{{ k8s_docker_registry_gc_namespace }}"
+        labels:
+          app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+      spec:
+        schedule: "{{ k8s_docker_registry_gc_schedule }}"
+        timeZone: "{{ k8s_docker_registry_gc_time_zone }}"
+        concurrencyPolicy: Forbid
+        startingDeadlineSeconds: "{{ k8s_docker_registry_gc_starting_deadline_seconds }}"
+        successfulJobsHistoryLimit: "{{ k8s_docker_registry_gc_successful_jobs_history_limit }}"
+        failedJobsHistoryLimit: "{{ k8s_docker_registry_gc_failed_jobs_history_limit }}"
+        jobTemplate:
+          spec:
+            backoffLimit: "{{ k8s_docker_registry_gc_backoff_limit }}"
+            activeDeadlineSeconds: "{{ k8s_docker_registry_gc_active_deadline_seconds }}"
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: "{{ k8s_docker_registry_gc_name }}"
+              spec:
+                serviceAccountName: "{{ k8s_docker_registry_gc_service_account_name }}"
+                automountServiceAccountToken: true
+                restartPolicy: Never
+                terminationGracePeriodSeconds: "{{ k8s_docker_registry_gc_termination_grace_period_seconds }}"
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 1001
+                  runAsGroup: 1001
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: garbage-collection
+                    image: "{{ k8s_docker_registry_gc_image }}"
+                    imagePullPolicy: "{{ k8s_docker_registry_gc_image_pull_policy }}"
+                    command:
+                      - /bin/bash
+                      - /scripts/registry_gc.sh
+                    env:
+                      - name: HOME
+                        value: /tmp
+                      - name: REGISTRY_NAMESPACE
+                        value: "{{ k8s_docker_registry_gc_namespace }}"
+                      - name: REGISTRY_DEPLOYMENT
+                        value: "{{ k8s_docker_registry_gc_deployment_name }}"
+                      - name: REGISTRY_CONTAINER
+                        value: "{{ k8s_docker_registry_gc_container_name }}"
+                      - name: REGISTRY_BINARY
+                        value: "{{ k8s_docker_registry_gc_binary }}"
+                      - name: REGISTRY_CONFIG_PATH
+                        value: "{{ k8s_docker_registry_gc_config_path }}"
+                      - name: CLEANUP_JOB_SELECTOR
+                        value: "{{ k8s_docker_registry_gc_cleanup_job_selector }}"
+                      - name: CLEANUP_WAIT_TIMEOUT_SECONDS
+                        value: "{{ k8s_docker_registry_gc_cleanup_wait_timeout_seconds | string }}"
+                      - name: ROLLOUT_TIMEOUT
+                        value: "{{ k8s_docker_registry_gc_rollout_timeout }}"
+                      - name: DELETE_UNTAGGED
+                        value: "{{ 'true' if k8s_docker_registry_gc_delete_untagged | bool else 'false' }}"
+                    resources: "{{ k8s_docker_registry_gc_resources }}"
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop:
+                          - ALL
+                      readOnlyRootFilesystem: true
+                      runAsNonRoot: true
+                      runAsUser: 1001
+                      runAsGroup: 1001
+                      seccompProfile:
+                        type: RuntimeDefault
+                    volumeMounts:
+                      - name: script
+                        mountPath: /scripts
+                        readOnly: true
+                      - name: tmp
+                        mountPath: /tmp
+                volumes:
+                  - name: script
+                    configMap:
+                      name: "{{ k8s_docker_registry_gc_name }}-script"
+                      defaultMode: 0444
+                  - name: tmp
+                    emptyDir:
+                      sizeLimit: 16Mi

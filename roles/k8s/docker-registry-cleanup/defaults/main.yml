@@ -3,9 +3,9 @@
 k8s_docker_registry_cleanup_namespace: ""
 k8s_docker_registry_cleanup_name: docker-registry-cleanup
 
-# Расписание в UTC; на час раньше garbage-collect чарта ("0 1 * * *"),
-# чтобы удалённые за ночь манифесты зачищались его же проходом
+# Retention runs before the coordinated GC CronJob; specify its time zone explicitly.
 k8s_docker_registry_cleanup_schedule: "0 0 * * *"
+k8s_docker_registry_cleanup_time_zone: Etc/UTC
 
 # Образ зафиксирован (только stdlib, внешних зависимостей у скрипта нет)
 k8s_docker_registry_cleanup_image: python:3.12.12-alpine3.23
