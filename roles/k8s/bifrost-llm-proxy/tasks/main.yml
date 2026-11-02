@@ -77,6 +77,7 @@
           enforceAuthOnInference: "{{ bifrost_llm_proxy_enforce_auth_on_inference | bool }}"
           enableLogging: "{{ bifrost_llm_proxy_enable_logging | bool }}"
           disableContentLogging: "{{ bifrost_llm_proxy_disable_content_logging | bool }}"
+          logRetentionDays: "{{ bifrost_llm_proxy_log_retention_days | int }}"
           vkRotationCooldown: "{{ bifrost_llm_proxy_vk_rotation_cooldown }}"
       postgresql:
         external:

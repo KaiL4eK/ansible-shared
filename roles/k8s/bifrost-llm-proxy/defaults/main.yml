@@ -37,6 +37,9 @@ bifrost_llm_proxy_auth_disable_auth_on_inference: true
 bifrost_llm_proxy_enforce_auth_on_inference: true
 bifrost_llm_proxy_enable_logging: true
 bifrost_llm_proxy_disable_content_logging: false
+# Request logs older than this many days are pruned; the chart (2.1.43)
+# default is 365. Passed to bifrost.client.logRetentionDays.
+bifrost_llm_proxy_log_retention_days: 365
 bifrost_llm_proxy_vk_rotation_cooldown: ""
 
 bifrost_llm_proxy_node_selector: {}
