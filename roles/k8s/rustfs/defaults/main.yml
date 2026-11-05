@@ -1,0 +1,75 @@
+---
+# --- Релиз и чарт ---
+k8s_rustfs_namespace: ""
+k8s_rustfs_release_name: rustfs
+k8s_rustfs_chart_ref: rustfs/rustfs
+k8s_rustfs_chart_repository_name: rustfs
+k8s_rustfs_chart_repository_url: https://charts.rustfs.com
+k8s_rustfs_chart_version: "1.0.4"
+k8s_rustfs_force_repository_update: false
+k8s_rustfs_create_namespace: false
+
+# --- Образы ---
+# Пин образа = версии чарта: README чарта требует образ того же релиза
+# ("The RustFS image from the same release as the chart"). initImage —
+# init-контейнер mkdir/chmod перед данными, достаточно любого busybox.
+k8s_rustfs_image_values:
+  repository: rustfs/rustfs
+  tag: "1.0.4"
+  pullPolicy: IfNotPresent
+k8s_rustfs_init_image_values:
+  repository: busybox
+  tag: "1.37.0"
+  pullPolicy: IfNotPresent
+
+# --- Креды root (S3 API и консоль) ---
+# Обязательны и не должны быть well-known "rustfsadmin": чарт отказывается
+# рендериться с пустыми/дефолтными значениями (guard в templates/secret.yaml).
+# Источник — consumer playbook (vault), не дефолты роли.
+k8s_rustfs_access_key: ""
+k8s_rustfs_secret_key: ""
+
+# --- Топология ---
+# standalone: Deployment (replicas = max(1, replicaCount)), PVC <release>-data
+# и <release>-logs. distributed: StatefulSet erasure-coded кластер, чарт
+# требует replicaCount >= 2 (иначе fail на рендере).
+k8s_rustfs_mode: standalone
+k8s_rustfs_replica_count: 1
+# null — чарт выводит drivesPerNode сам из replicaCount (1 при != 4);
+# явное число задавать только до первой установки: volumeClaimTemplates
+# StatefulSet иммутабельны.
+k8s_rustfs_drives_per_node: null
+k8s_rustfs_node_selector: {}
+
+# --- Хранилище ---
+# PVC создаются с аннотацией helm.sh/resource-policy: keep — переживают
+# helm delete; класс и размеры менять до первого запуска (resize зависит от SC).
+k8s_rustfs_storage_class: ""
+k8s_rustfs_data_storage_size: ""
+k8s_rustfs_log_storage_size: ""
+
+# --- Сервис и ingress ---
+k8s_rustfs_service_type: ClusterIP
+k8s_rustfs_endpoint_port: 9000
+k8s_rustfs_console_port: 9001
+k8s_rustfs_ingress_enabled: false
+k8s_rustfs_ingress_class_name: traefik
+# Хосты S3 API и веб-консоли: чарт рендерит один Ingress, обе записи ведут
+# на один Service по именованным портам (servicePort: endpoint | console).
+# При enabled: true оба хоста обязательны; TLS терминировать на ingress —
+# ingress.tls чарта остаётся выключенным.
+k8s_rustfs_ingress_api_host: ""
+k8s_rustfs_ingress_console_host: ""
+
+# --- Конфигурация и ресурсы ---
+# Passthrough в config.rustfs чарта: region, log_level, console_enable,
+# domains (virtual-hosted style) и т.д. Пустой dict дефолты чарта не стирает.
+k8s_rustfs_config: {}
+k8s_rustfs_extra_env: []
+k8s_rustfs_resources: {}
+
+# --- Поведение Helm ---
+k8s_rustfs_atomic: false
+k8s_rustfs_wait: true
+k8s_rustfs_take_ownership: false
+k8s_rustfs_timeout: 10m0s
