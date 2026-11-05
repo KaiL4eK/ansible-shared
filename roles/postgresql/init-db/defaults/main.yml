@@ -10,6 +10,12 @@ postgresql_init_db_user: ""
 postgresql_init_db_user_password: ""
 postgresql_init_db_name: ""
 
+# Пароль приложения обязателен: bootstrap всегда создаёт пользователя с
+# паролем (контрольный вход с неверным паролем — часть проверки роли).
+# Значения-заглушки (CHANGE_ME/dummy/placeholder) отклоняются и для
+# приложения, и для админа — до любых подключений.
+postgresql_init_db_password_placeholder_regex: '(?i)^(CHANGE_ME|dummy|placeholder)'
+
 postgresql_init_db_encoding: null
 postgresql_init_db_lc_collate: null
 postgresql_init_db_lc_ctype: null

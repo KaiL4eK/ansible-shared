@@ -1,0 +1,39 @@
+---
+# Роль: reconcile VaultStaticSecret (VSO) на готовый VaultAuth-консьюмер
+# и верификация синхронизации destination Secret'ов. Консьюмер
+# (SA/VaultConnection/VaultAuth) и mount создаются отдельно (bootstrap
+# consumer'а) — роль только проецирует. Кластер и kubeconfig не разворачивает:
+# kubernetes.core-модули используют environment плейбука
+# (K8S_AUTH_KUBECONFIG/KUBECONFIG).
+
+# Namespace проекции; consumer задаёт явно.
+k8s_vso_namespace: ""
+
+# VaultAuth-консьюмер (vaultAuthRef) и mount KV v2; канонические значения
+# канала kv-agent — consumer передаёт явно при отличии.
+k8s_vso_auth_name: kv-agent
+k8s_vso_mount: kv-agent
+
+# Список проекций: [{name, path, destination, includes, keys,
+#                    templates?, restart_targets?, refresh_after?}]
+#   name        — имя VaultStaticSecret-ресурса;
+#   path        — путь в mount без префикса;
+#   destination — имя destination Secret (по умолчанию = name);
+#   includes    — список regex ключей, попадающих в Secret (контракт);
+#   keys        — ожидаемые ключи destination Secret для верификации;
+#   templates   — словарь Go-шаблонов VSO (по умолчанию {});
+#   restart_targets — rolloutRestartTargets (по умолчанию []);
+#   refresh_after   — период синка VSO (по умолчанию 60s).
+k8s_vso_secrets: []
+
+# Проверки предусловий: установлены ли CRD VSO и существует ли VaultAuth.
+k8s_vso_check_crd: true
+k8s_vso_check_vault_auth: true
+
+# Ожидание синхронизации: condition SecretSynced=True по каждому VaultStaticSecret.
+k8s_vso_wait_timeout: 300
+
+# Дополнительная сверка ключей destination Secret (только имена ключей,
+# значения не читаются): retries x delay поверх ожидания condition.
+k8s_vso_key_check_retries: 10
+k8s_vso_key_check_delay: 5

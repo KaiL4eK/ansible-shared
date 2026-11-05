@@ -42,4 +42,7 @@ k8s_postgresql_init_admin_user: ""
 k8s_postgresql_init_admin_password: ""
 k8s_postgresql_init_user: ""
 k8s_postgresql_init_password: ""
+# Inline-креды (юзер и админ) отклоняются как заглушки до создания временного
+# Secret'а и Job'а; значения при провале не выводятся.
+k8s_postgresql_init_password_placeholder_regex: '(?i)^(CHANGE_ME|dummy|placeholder)'
 k8s_postgresql_init_kubeconfig: ""

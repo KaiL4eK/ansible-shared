@@ -4,7 +4,8 @@
     that:
       - postgresql_init_db_user | length > 0
       - postgresql_init_db_name | length > 0
-    fail_msg: "postgresql_init_db_user and postgresql_init_db_name are required"
+      - postgresql_init_db_user_password | length > 0
+    fail_msg: "postgresql_init_db_user, postgresql_init_db_name and postgresql_init_db_user_password are required"
 
 - name: Determine whether admin credentials are provided
   ansible.builtin.set_fact:
@@ -14,6 +15,20 @@
         and
         (postgresql_init_db_admin_password | length > 0)
       }}
+
+- name: Reject empty or placeholder credentials before connecting
+  ansible.builtin.assert:
+    that:
+      - not postgresql_init_db_use_admin_credentials or postgresql_init_db_admin_password | length > 0
+      - postgresql_init_db_user_password is not match(postgresql_init_db_password_placeholder_regex)
+      - >-
+        (not postgresql_init_db_use_admin_credentials) or
+        (postgresql_init_db_admin_password is not match(postgresql_init_db_password_placeholder_regex))
+    fail_msg: >-
+      Database credentials are empty or look like placeholders
+      (CHANGE_ME/dummy/placeholder); values are hidden.
+    quiet: true
+  no_log: true
 
 - name: Inspect existing PostgreSQL user and database
   community.postgresql.postgresql_query:

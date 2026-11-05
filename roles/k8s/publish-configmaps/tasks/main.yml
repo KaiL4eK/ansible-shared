@@ -1,0 +1,43 @@
+---
+- name: Validate the configmaps input shape
+  ansible.builtin.assert:
+    that:
+      - k8s_publish_configmaps_namespace | length > 0
+      - k8s_publish_configmaps | length > 0
+    fail_msg: >-
+      Укажите k8s_publish_configmaps_namespace и непустой словарь
+      k8s_publish_configmaps {имя ConfigMap: {ключ: значение}}.
+
+- name: Validate open infrastructure configuration
+  ansible.builtin.assert:
+    that:
+      - item.value | length > 0
+      - item.value.values() | select('equalto', '') | list | length == 0
+      - item.value.values() | reject('string') | list | length == 0
+    quiet: true
+  loop: "{{ k8s_publish_configmaps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Publish the infrastructure ConfigMaps
+  kubernetes.core.k8s:
+    state: present
+    force: true
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ item.key }}"
+        namespace: "{{ k8s_publish_configmaps_namespace }}"
+        labels: "{{ k8s_publish_configmaps_labels }}"
+      data: "{{ item.value }}"
+  loop: "{{ k8s_publish_configmaps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Report the sanitized summary
+  ansible.builtin.debug:
+    msg: >-
+      ConfigMaps {{ k8s_publish_configmaps.keys() | list | sort | join(', ') }}
+      published to {{ k8s_publish_configmaps_namespace }}
+      ({{ k8s_publish_configmaps.values() | map('length') | sum }} keys total).

@@ -1,0 +1,137 @@
+---
+# Preflight → reconcile VaultStaticSecret → ожидание SecretSynced →
+# сверка ключей destination Secret'ов (имена ключей, без значений).
+# Наружу — только имена ресурсов и путей: значения секретов роль не читает
+# и не печатает.
+- name: Validate role inputs
+  ansible.builtin.assert:
+    that:
+      - k8s_vso_namespace | length > 0
+      - k8s_vso_auth_name | length > 0
+      - k8s_vso_mount | length > 0
+      - k8s_vso_secrets | length > 0
+      - item.name | length > 0
+      - item.path | length > 0
+      - item.includes | default([]) | length > 0
+      - item.keys | default([]) | length > 0
+    fail_msg: >-
+      Укажите k8s_vso_namespace/auth_name/mount и список k8s_vso_secrets
+      (каждый элемент: name, path, includes, keys).
+    quiet: true
+  loop: "{{ k8s_vso_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Verify the Vault Secrets Operator CRDs are installed
+  kubernetes.core.k8s_info:
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: vaultstaticsecrets.secrets.hashicorp.com
+  register: k8s_vso_crd
+  when: k8s_vso_check_crd | bool
+
+- name: Assert the Vault Secrets Operator is installed
+  ansible.builtin.assert:
+    that:
+      - k8s_vso_crd.resources | length == 1
+    fail_msg: Install the Vault Secrets Operator before configuring consumers.
+  when: k8s_vso_check_crd | bool
+
+- name: Verify the consumer VaultAuth exists
+  kubernetes.core.k8s_info:
+    api_version: secrets.hashicorp.com/v1beta1
+    kind: VaultAuth
+    namespace: "{{ k8s_vso_namespace }}"
+    name: "{{ k8s_vso_auth_name }}"
+  register: k8s_vso_auth_check
+  when: k8s_vso_check_vault_auth | bool
+
+- name: Assert the consumer VaultAuth is present
+  ansible.builtin.assert:
+    that:
+      - k8s_vso_auth_check.resources | length == 1
+    fail_msg: >-
+      VaultAuth {{ k8s_vso_auth_name }} не найден в namespace
+      {{ k8s_vso_namespace }}: сначала bootstrap VaultAuth-консьюмера.
+  when: k8s_vso_check_vault_auth | bool
+
+- name: Reconcile the VaultStaticSecrets
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: secrets.hashicorp.com/v1beta1
+      kind: VaultStaticSecret
+      metadata:
+        name: "{{ item.name }}"
+        namespace: "{{ k8s_vso_namespace }}"
+      spec:
+        vaultAuthRef: "{{ k8s_vso_auth_name }}"
+        type: kv-v2
+        mount: "{{ k8s_vso_mount }}"
+        path: "{{ item.path }}"
+        refreshAfter: "{{ item.refresh_after | default('60s') }}"
+        hmacSecretData: true
+        destination:
+          name: "{{ item.destination | default(item.name) }}"
+          create: true
+          overwrite: true
+          transformation:
+            excludeRaw: true
+            includes: "{{ item.includes }}"
+            templates: "{{ item.templates | default({}) }}"
+        rolloutRestartTargets: "{{ item.restart_targets | default([]) }}"
+  loop: "{{ k8s_vso_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Wait for the VaultStaticSecrets to synchronize
+  kubernetes.core.k8s_info:
+    api_version: secrets.hashicorp.com/v1beta1
+    kind: VaultStaticSecret
+    namespace: "{{ k8s_vso_namespace }}"
+    name: "{{ item.name }}"
+    wait: true
+    wait_timeout: "{{ k8s_vso_wait_timeout | int }}"
+    wait_condition:
+      type: SecretSynced
+      status: "True"
+  register: k8s_vso_sync
+  loop: "{{ k8s_vso_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert VSO reconciled the expected generation
+  ansible.builtin.assert:
+    that:
+      - item.resources | length == 1
+      - item.resources[0].status.lastGeneration | default(0) | int == item.resources[0].metadata.generation | int
+    fail_msg: VSO did not reconcile the expected generation for {{ item.item.name }}.
+  loop: "{{ k8s_vso_sync.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Read the destination Secrets for key verification
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_vso_namespace }}"
+    name: "{{ item.destination | default(item.name) }}"
+  register: k8s_vso_destinations
+  retries: "{{ k8s_vso_key_check_retries | int }}"
+  delay: "{{ k8s_vso_key_check_delay | int }}"
+  until: >-
+    k8s_vso_destinations.resources | length == 1
+    and item.keys | default([]) | length > 0
+    and item.keys | difference(k8s_vso_destinations.resources[0].data | default({}) | dict2items | map(attribute='key') | list) | length == 0
+  loop: "{{ k8s_vso_secrets }}"
+  loop_control:
+    label: "{{ item.destination | default(item.name) }}"
+  no_log: true
+
+- name: Report the sanitized summary
+  ansible.builtin.debug:
+    msg: >-
+      VaultStaticSecrets ready in {{ k8s_vso_namespace }}:
+      {{ k8s_vso_secrets | map(attribute='name') | join(', ') }};
+      mount {{ k8s_vso_mount }}, VaultAuth {{ k8s_vso_auth_name }}
+      (keys checked, values not read).

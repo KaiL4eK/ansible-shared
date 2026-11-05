@@ -1,0 +1,12 @@
+---
+# Роль: публикация открытых ConfigMap из переменных consumer'а без загрузки
+# credentials. Валидация значений видимая (значения не секретные); наружу —
+# имена ConfigMap и ключи.
+k8s_publish_configmaps_namespace: ""
+
+# {<имя ConfigMap>: {<ключ>: <значение>}} — значения должны быть строками.
+k8s_publish_configmaps: {}
+
+# Лейблы объектов; consumer может добавить свои (например, app name).
+k8s_publish_configmaps_labels:
+  app.kubernetes.io/managed-by: ansible

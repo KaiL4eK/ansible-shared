@@ -23,6 +23,28 @@
   loop_control:
     label: "{{ item.key }}"
 
+- name: Check Vault is initialized and unsealed
+  ansible.builtin.uri:
+    # sys/health — unauthenticated endpoint: доступен без policy на sys/*.
+    # 429/472/473 — standby/disaster-recovery/performance состояния: тело всё
+    # равно содержит initialized/sealed, финальный assert решает.
+    url: "{{ k8s_vault_kv_address }}/v1/sys/health"
+    status_code: [200, 429, 472, 473]
+    use_proxy: false
+    follow_redirects: none
+  register: k8s_vault_kv_health
+  when: k8s_vault_kv_verify_health | bool
+
+- name: Assert Vault is initialized and unsealed
+  ansible.builtin.assert:
+    that:
+      - k8s_vault_kv_health.json.initialized | bool
+      - not k8s_vault_kv_health.json.sealed | bool
+    fail_msg: >-
+      Vault не готов: initialized={{ k8s_vault_kv_health.json.initialized | default('unknown') }},
+      sealed={{ k8s_vault_kv_health.json.sealed | default('unknown') }} (sys/health).
+  when: k8s_vault_kv_verify_health | bool
+
 - name: Reconcile KV v2 records in the agent mount
   block:
     - name: Log in to Vault with the agent AppRole
@@ -90,6 +112,30 @@
           loop_control:
             label: "{{ item.item.path }}"
 
+        - name: Reduce read results to sanitized statuses
+          ansible.builtin.set_fact:
+            k8s_vault_kv_read_statuses: "{{ k8s_vault_kv_read_statuses | default([]) + [read_status] }}"
+          vars:
+            read_status: >-
+              {{ {'path': item.path,
+                  'existed': (item.version | int > 0),
+                  'version': item.version | int} }}
+          loop: "{{ k8s_vault_kv_current | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+        - name: Report the check-only read statuses
+          ansible.builtin.debug:
+            msg: >-
+              Vault paths checked ({{ k8s_vault_kv_read_statuses | length }}):
+              existing — {{ k8s_vault_kv_read_statuses
+              | selectattr('existed', 'equalto', true)
+              | map(attribute='path') | list | sort | join(', ') }};
+              missing — {{ k8s_vault_kv_read_statuses
+              | selectattr('existed', 'equalto', false)
+              | map(attribute='path') | list | sort | join(', ') }}.
+          when: k8s_vault_kv_check_only | bool
+
         - name: Flatten record fields into per-field entries
           ansible.builtin.set_fact:
             k8s_vault_kv_fields: |
@@ -106,6 +152,7 @@
               {%-   endfor -%}
               {%- endfor -%}
               {{ entries }}
+          when: not k8s_vault_kv_check_only | bool
 
         - name: Compute the desired value for each field
           ansible.builtin.set_fact:
@@ -124,21 +171,25 @@
                                  and (item.current | string | length > 0))
                              else 'generated')) }}
             field_generated_value: >-
-              {{ lookup('community.general.random_string', length=field_length,
-                        special=field_special) }}
+              {{ lookup('ansible.builtin.password',
+                        '/dev/null length=' ~ (field_length | int) ~ ' chars=' ~ field_spec.chars)
+                 if (field_spec.chars is defined and field_spec.chars | length > 0)
+                 else lookup('community.general.random_string', length=field_length,
+                             special=field_special) }}
             field_value_entry: >-
               {{ {'path': item.path, 'name': item.name, 'state': field_state,
                   'value': field_generated_value if field_state in ['generated', 'rotated'] else
                            (field_spec.value if field_state == 'literal' else item.current)} }}
-          loop: "{{ k8s_vault_kv_fields }}"
+          loop: "{{ k8s_vault_kv_fields | default([]) }}"
           loop_control:
             label: "{{ item.path }}/{{ item.name }}"
+          when: not k8s_vault_kv_check_only | bool
 
         - name: Assemble the desired data and action for each record
           ansible.builtin.set_fact:
             k8s_vault_kv_plan: "{{ k8s_vault_kv_plan | default([]) + [plan_entry] }}"
           vars:
-            record_fields: "{{ k8s_vault_kv_field_values | selectattr('path', 'equalto', item.path) | list }}"
+            record_fields: "{{ k8s_vault_kv_field_values | default([]) | selectattr('path', 'equalto', item.path) | list }}"
             record_current: >-
               {{ k8s_vault_kv_current
                  | selectattr('path', 'equalto', item.path)
@@ -158,6 +209,7 @@
           loop: "{{ k8s_vault_kv_records }}"
           loop_control:
             label: "{{ item.path }}"
+          when: not k8s_vault_kv_check_only | bool
 
         - name: Write changed KV v2 records with compare-and-set
           ansible.builtin.uri:
@@ -168,12 +220,13 @@
                 cas: "{{ item.cas | int }}"
               data: "{{ item.data }}"
             status_code: [200, 204]
-          loop: "{{ k8s_vault_kv_plan | selectattr('action', 'equalto', 'write') | list }}"
+          loop: "{{ k8s_vault_kv_plan | default([]) | selectattr('action', 'equalto', 'write') | list }}"
           loop_control:
             label: "{{ item.path }}"
           register: k8s_vault_kv_writes
           failed_when: false
           changed_when: true
+          when: not k8s_vault_kv_check_only | bool
 
     - name: Reduce write results to sanitized statuses
       ansible.builtin.set_fact:
@@ -189,7 +242,7 @@
         k8s_vault_kv_summary: >-
           {{ (k8s_vault_kv_summary | default([])) +
              [{'path': item.path, 'action': item.action, 'changed_fields': item.changed_fields}] }}
-      loop: "{{ k8s_vault_kv_plan }}"
+      loop: "{{ k8s_vault_kv_plan | default([]) }}"
       loop_control:
         label: "{{ item.path }}"
 

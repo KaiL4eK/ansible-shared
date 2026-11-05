@@ -56,7 +56,31 @@ Before working with this repository, install Ansible dependencies:
   `always`. Только Vault API с контроллера: без кластера, Kubernetes Secret'ов
   и развёртывания Vault. Наружу — sanitized summary (fact `k8s_vault_kv_summary`,
   без значений); policy AppRole должна разрешать `auth/token/revoke-self`.
+  Опции: `chars` (генерация по набору символов, напр. `hexdigits`),
+  `k8s_vault_kv_verify_health` (гейт initialized/unsealed),
+  `k8s_vault_kv_check_only` (только проверить наличие путей, факт
+  `k8s_vault_kv_read_statuses` — для условного bootstrap consumer'а).
   [Контракт роли](roles/k8s/vault-kv/README.md).
+
+- `roles/k8s/vso-static-secret/` — reconcile VaultStaticSecret на готовый
+  VaultAuth-консьюмер: preflight (CRD VSO, существование VaultAuth), список
+  проекций `{name, path, destination, includes, keys, templates?,
+  restart_targets?, refresh_after?}`, ожидание condition `SecretSynced=True`
+  со сверкой `lastGeneration`, верификация ключей destination Secret
+  (только имена ключей). Консьюмер и mount создаёт отдельный bootstrap.
+  [Контракт роли](roles/k8s/vso-static-secret/README.md).
+
+- `roles/k8s/publish-secrets/` — публикация runtime Kubernetes Secret'ов из
+  значений, загруженных consumer-плейбуком (типовой источник — Ansible
+  Vault): placeholder-валидация под `no_log`, публикация с `force: true`,
+  верификация состава ключей. Источник credentials роли неизвестен.
+  [Контракт роли](roles/k8s/publish-secrets/README.md).
+
+- `roles/k8s/publish-configmaps/` — публикация открытых (некреденциальных)
+  ConfigMap из переменных consumer'а: видимая валидация значений,
+  публикация с `force: true`. Credentials идут через соседнюю
+  `roles/k8s/publish-secrets/`.
+  [Контракт роли](roles/k8s/publish-configmaps/README.md).
 
 - `roles/k8s/bifrost-llm-proxy/` — Bifrost через официальный Helm chart.
   Credentials передаются непосредственно через Helm values; отдельный Secret

@@ -1,0 +1,68 @@
+---
+- name: Validate the secrets input shape
+  ansible.builtin.assert:
+    that:
+      - k8s_publish_secrets_namespace | length > 0
+      - k8s_publish_secrets | length > 0
+    fail_msg: >-
+      Укажите k8s_publish_secrets_namespace и непустой словарь
+      k8s_publish_secrets {имя Secret: {ключ: значение}}.
+
+- name: Reject empty or placeholder credentials before any Secret changes
+  ansible.builtin.assert:
+    that:
+      - item.value | length > 0
+      - item.value.values() | select('equalto', '') | list | length == 0
+      - item.value.values() | reject('string') | list | length == 0
+      - item.value.values() | select('match', '(?i)^(CHANGE_ME|dummy|placeholder)') | list | length == 0
+    quiet: true
+  loop: "{{ k8s_publish_secrets | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Publish the runtime Secrets
+  kubernetes.core.k8s:
+    state: present
+    force: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ item.key }}"
+        namespace: "{{ k8s_publish_secrets_namespace }}"
+        labels: "{{ k8s_publish_secrets_labels }}"
+      type: Opaque
+      data: "{{ dict(item.value.keys() | zip(item.value.values() | map('b64encode'))) }}"
+  loop: "{{ k8s_publish_secrets | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+  diff: false
+
+- name: Verify the published Secrets carry the contract keys
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ k8s_publish_secrets_namespace }}"
+    name: "{{ item.key }}"
+  register: k8s_publish_secrets_published
+  retries: "{{ k8s_publish_secrets_verify_retries | int }}"
+  delay: "{{ k8s_publish_secrets_verify_delay | int }}"
+  until: >-
+    k8s_publish_secrets_published.resources | length == 1
+    and item.value.keys() | list
+    | difference(k8s_publish_secrets_published.resources[0].data | default({})
+    | dict2items | map(attribute='key') | list) | length == 0
+  loop: "{{ k8s_publish_secrets | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+  when: k8s_publish_secrets_verify | bool
+
+- name: Report the sanitized summary
+  ansible.builtin.debug:
+    msg: >-
+      Runtime Secrets {{ k8s_publish_secrets.keys() | list | sort | join(', ') }}
+      published to {{ k8s_publish_secrets_namespace }}
+      (keys verified, values not printed).

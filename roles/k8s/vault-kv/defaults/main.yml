@@ -2,16 +2,17 @@
 # Роль: идемпотентная запись записей KV v2 в HashiCorp Vault через AppRole.
 # Для каждой записи (path + fields): читает текущую версию, сохраняет
 # существующие значения (keep_existing), генерирует отсутствующие
-# (community.general.random_string), ротирует по флагу и пишет с CAS.
-# Значения наружу не выводятся: только sanitized-статусы и summary.
-# Результат для вызывающего плейбука — fact k8s_vault_kv_summary
-# ([{path, action, changed_fields}]).
+# (community.general.random_string или ansible.builtin.password при chars),
+# ротирует по флагу и пишет с CAS. Значения наружу не выводятся: только
+# sanitized-статусы и summary. Результаты для вызывающего плейбука —
+# факты k8s_vault_kv_summary ([{path, action, changed_fields}]) и
+# k8s_vault_kv_read_statuses ([{path, existed, version}]).
 k8s_vault_kv_address: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | regex_replace('/+$', '') }}"
 k8s_vault_kv_role_id: "{{ lookup('ansible.builtin.env', 'VAULT_ROLE_ID') }}"
 k8s_vault_kv_secret_id: "{{ lookup('ansible.builtin.env', 'VAULT_SECRET_ID') }}"
 
 # Mount KV v2 и список записей: [{path: <путь без префикса mount>,
-# fields: {<имя>: {length, special, rotate, keep_existing, value}}}].
+# fields: {<имя>: {length, special, chars, rotate, keep_existing, value}}}].
 # Дефолт mount — канонический `secret`; consumer передаёт конкретный
 # mount явно (deployment-specific значение в роль не зашивается).
 k8s_vault_kv_mount: secret
@@ -20,3 +21,13 @@ k8s_vault_kv_records: []
 # Параметры генерации по умолчанию: буквенно-цифровые пароли без спецсимволов.
 k8s_vault_kv_default_length: 32
 k8s_vault_kv_default_special: false
+
+# Только проверить наличие путей (login + чтение + revoke): записей нет,
+# генерация/запись не выполняются. Для условного bootstrap consumer'а:
+# факт k8s_vault_kv_read_statuses говорит, каких путей нет, и плейбук
+# загружает дополнительные credentials только для них.
+k8s_vault_kv_check_only: false
+
+# GET /v1/sys/health (unauthenticated) перед логином: initialized и не
+# запечатан. По умолчанию выключено — существующие consumer'ы не проверяют.
+k8s_vault_kv_verify_health: false

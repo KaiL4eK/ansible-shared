@@ -1,0 +1,18 @@
+---
+# Роль: публикация runtime Kubernetes Secret'ов из уже загруженных
+# consumer'ом значений (источник — Ansible Vault или иные credentials,
+# загруженные плейбуком через vars_files/include_vars). Валидация значений
+# выполняется под no_log; наружу — только имена Secret'ов.
+k8s_publish_secrets_namespace: ""
+
+# {<имя Secret>: {<ключ>: <значение>}} — значения должны быть строками.
+k8s_publish_secrets: {}
+
+# Лейблы объектов; consumer может добавить свои (например, component).
+k8s_publish_secrets_labels:
+  app.kubernetes.io/managed-by: ansible
+
+# Верификация: после применения сверить состав ключей (имена, без значений).
+k8s_publish_secrets_verify: true
+k8s_publish_secrets_verify_retries: 6
+k8s_publish_secrets_verify_delay: 5

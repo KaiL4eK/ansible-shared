@@ -19,6 +19,10 @@
 Ровно один источник пароля администратора: inline
 `k8s_postgresql_init_admin_password` XOR готовый
 `k8s_postgresql_init_admin_secret_name` — контракт проверяется assert'ом.
+Inline-креды (юзер и админ) проверяются на непустоту и на значения-заглушки
+(`CHANGE_ME`/`dummy`/`placeholder`, набор настраивается
+`k8s_postgresql_init_password_placeholder_regex`) до создания временного
+Secret'а; consumer-плейбуку дублировать проверку не нужно.
 
 ## Настройка
 
