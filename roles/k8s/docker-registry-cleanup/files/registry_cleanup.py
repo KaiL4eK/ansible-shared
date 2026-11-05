@@ -10,6 +10,9 @@
   (для OCI-индексов берётся первый linux/amd64 дочерний манифест).
 - Удаление выполняется по digest манифеста. Digest, на который ссылается любой
   сохраняемый тег, не удаляется (API реестра удаляет манифест целиком).
+- Призрачные теги (есть в tags/list, манифест по ним 404 — остаются после
+  удаления манифестов/GC) снимаются DELETE по имени тега; для реестров без
+  delete-by-tag (405) просто пропускаются, ошибкой не считаются.
 - Место освобождает отдельный координированный CronJob ``docker-registry-gc``:
   он переводит Registry в read-only, дожидается завершения этой чистки и запускает GC.
 
@@ -45,6 +48,14 @@ INDEX_MEDIA_TYPES = {
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.oci.image.index.v1+json",
 }
+
+
+class GhostTagError(RuntimeError):
+    """Тег есть в tags/list, но манифест по нему отсутствует (HTTP 404).
+
+    Такие tag-link остаются после удаления манифеста/GC; реестр их из
+    tags/list сам не убирает. Лечится DELETE по имени тега (Registry 3).
+    """
 
 
 def env(name, default):
@@ -105,6 +116,11 @@ def parse_created(value):
         return None
 
 
+def manifests_path(repo, reference):
+    """Путь к манифесту по тегу или digest."""
+    return "/v2/{}/manifests/{}".format(quote(repo, safe="/"), quote(reference, safe=":._-+"))
+
+
 def resolve_manifest(repo, reference, depth=0):
     """Возвращает (digest, config_digest) манифеста, разворачивая индексы."""
     cache_key = (repo, reference)
@@ -112,8 +128,10 @@ def resolve_manifest(repo, reference, depth=0):
         return manifest_cache[cache_key]
     if depth > 2:
         raise RuntimeError("слишком глубокая вложенность OCI-индекса")
-    path = "/v2/{}/manifests/{}".format(quote(repo, safe="/"), quote(reference, safe=":._-+"))
+    path = manifests_path(repo, reference)
     status, data, headers = request("GET", path)
+    if status == 404:
+        raise GhostTagError("GET {}: HTTP 404".format(path))
     if status != 200:
         raise RuntimeError("GET {}: HTTP {}".format(path, status))
     digest = headers.get("Docker-Content-Digest")
@@ -182,7 +200,7 @@ def main():
     min_time = datetime.min.replace(tzinfo=timezone.utc)
     stats = {
         "repos": 0, "tags": 0, "protected": 0, "kept": 0,
-        "deleted": 0, "skipped": 0, "errors": 0,
+        "deleted": 0, "skipped": 0, "errors": 0, "ghosts": 0,
     }
     for repo in repos:
         try:
@@ -199,6 +217,21 @@ def main():
             stats["tags"] += 1
             try:
                 digest, config_digest = resolve_manifest(repo, tag)
+            except GhostTagError:
+                # Призрачный tag-link (манифест уже удалён/GC): снимаем тег,
+                # чтобы tags/list не врал. Реестры без DELETE по тегу (405)
+                # просто пропускаем — blob всё равно нет, вреда нет.
+                stats["ghosts"] += 1
+                if DRY_RUN:
+                    log("{}: [dry-run] снят был бы призрачный тег {}".format(repo, tag))
+                    continue
+                status, _, _ = request("DELETE", manifests_path(repo, tag))
+                if status in (202, 404, 405):
+                    log("{}: снят призрачный тег {} (DELETE HTTP {})".format(repo, tag, status))
+                else:
+                    stats["errors"] += 1
+                    log("[ОШИБКА] {}: снятие призрачного тега {}: HTTP {}".format(repo, tag, status))
+                continue
             except RuntimeError as exc:
                 stats["errors"] += 1
                 log("[ОШИБКА] {}: {}: {}".format(repo, tag, exc))
@@ -237,8 +270,7 @@ def main():
                 log("{}: [dry-run] удалён бы digest {} (теги: {})".format(
                     repo, digest[:19], ", ".join(tag_list)))
                 continue
-            path = "/v2/{}/manifests/{}".format(quote(repo, safe="/"), quote(digest, safe=":._-+"))
-            status, _, _ = request("DELETE", path)
+            status, _, _ = request("DELETE", manifests_path(repo, digest))
             if status in (202, 404):
                 stats["deleted"] += 1
                 log("{}: удалён digest {} HTTP {} (теги: {})".format(
@@ -249,7 +281,7 @@ def main():
     log(
         "Итог: репозиториев: {repos}, тегов просмотрено: {tags}, защищено: {protected}, "
         "сохранено по политике: {kept}, удалено манифестов: {deleted}, "
-        "пропущено digest: {skipped}, ошибок: {errors}".format(**stats)
+        "пропущено digest: {skipped}, призрачных тегов снято: {ghosts}, ошибок: {errors}".format(**stats)
     )
     if not DRY_RUN and stats["deleted"]:
         log("Место освободит garbage-collect реестра (docker-registry-garbage-collector)")
