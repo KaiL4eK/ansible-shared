@@ -22,23 +22,100 @@
   no_log: true
 
 - name: Publish the runtime Secrets
-  kubernetes.core.k8s:
-    state: present
-    force: true
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: "{{ item.key }}"
-        namespace: "{{ k8s_publish_secrets_namespace }}"
-        labels: "{{ k8s_publish_secrets_labels }}"
-      type: Opaque
-      data: "{{ dict(item.value.keys() | zip(item.value.values() | map('b64encode'))) }}"
-  loop: "{{ k8s_publish_secrets | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
-  no_log: true
-  diff: false
+  block:
+    - name: Apply each runtime Secret
+      kubernetes.core.k8s:
+        state: present
+        force: true
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ item.key }}"
+            namespace: "{{ k8s_publish_secrets_namespace }}"
+            labels: "{{ k8s_publish_secrets_labels }}"
+          type: Opaque
+          data: "{{ dict(item.value.keys() | zip(item.value.values() | map('b64encode'))) }}"
+      register: k8s_publish_secrets_applied
+      loop: "{{ k8s_publish_secrets | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+      diff: false
+  rescue:
+    # Полный вывод задачи скрыт no_log: msg упавшего модуля возвращает
+    # module_args с credential-значениями (base64 данных Secret). Наружу —
+    # sanitized-сводка: имя Secret, HTTP-код из тела ответа API, reason и
+    # поле message тела Status (причины вида invalid data key, immutable,
+    # admission). Извлечённые message перед показом чистятся от публикуемых
+    # значений и их base64-форм (подстрочная замена <redacted>; осознанно
+    # может частично замылить текст — перескраб безопаснее недоскраба).
+    # Jinja строковые литералы передают бэкслеши как есть — regex'ы пишутся
+    # с одиночными \d, \s, \| (рендер-тест на фейковых данных в .tmp/).
+    - name: Collect the failed apply results under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_failed: >-
+          {{ k8s_publish_secrets_applied.results | default([])
+             | selectattr('failed', 'defined')
+             | selectattr('failed') | list }}
+      no_log: true
+
+    - name: Extract the API Status messages from the failures under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_api_messages: >-
+          {{ k8s_publish_secrets_failed
+             | map(attribute='msg', default='')
+             | map('regex_findall', '"message":"(.*?)",\s*"reason"')
+             | map('join', ' ') | list }}
+      no_log: true
+
+    - name: Build the sanitized per-Secret failure records under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_failures: >-
+          {{ k8s_publish_secrets_failures | default([]) + [{
+               'name': item.item.key,
+               'code': (item.msg | default('', true)
+                         | regex_findall('"code":(\d+)') | join('')) | default(-1, true),
+               'reason': item.reason | default('unknown'),
+             }] }}
+      loop: "{{ k8s_publish_secrets_failed }}"
+      no_log: true
+
+    - name: Collect the credential tokens for scrubbing under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_scrub_tokens: >-
+          {{ k8s_publish_secrets.values() | list
+             | map('dict2items') | list | flatten
+             | map(attribute='value') | select('string')
+             | select('ne', '') | list }}
+      no_log: true
+
+    - name: Scrub the credential values and their b64 forms from the messages under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_api_messages: >-
+          {{ k8s_publish_secrets_api_messages
+             | map('regex_replace', item | regex_escape, '<redacted>') | list }}
+      loop: "{{ k8s_publish_secrets_scrub_tokens
+                + (k8s_publish_secrets_scrub_tokens | map('b64encode') | list) }}"
+      no_log: true
+
+    - name: Build the final sanitized failure summary under no_log
+      ansible.builtin.set_fact:
+        k8s_publish_secrets_summary: >-
+          {{ k8s_publish_secrets_failures
+             | map(attribute='name') | zip(
+               k8s_publish_secrets_failures | map(attribute='code') | map('string'),
+               k8s_publish_secrets_failures | map(attribute='reason'),
+               k8s_publish_secrets_api_messages)
+             | map('map', 'string') | map('join', ' | ') | list }}
+      no_log: true
+
+    - name: Fail with the sanitized publish diagnostics
+      ansible.builtin.fail:
+        msg: >-
+          Runtime Secret(s) не опубликованы (формат записи: имя | HTTP-код |
+          reason | message API, значения очищены): {{ k8s_publish_secrets_summary }}.
+          Полный вывод скрыт no_log (содержит credential-значения).
 
 - name: Verify the published Secrets carry the contract keys
   kubernetes.core.k8s_info:
