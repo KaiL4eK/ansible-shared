@@ -95,19 +95,6 @@ Before working with this repository, install Ansible dependencies:
   Secret, reusing it on subsequent upgrades (the value is never stored in
   Vault by the role); a non-empty password is passed to `auth.postgresPassword`
   as before.
-- `roles/k8s/rustfs/` deploys RustFS (S3-compatible object storage) through
-  the official `rustfs/rustfs` Helm chart with pinned chart and image
-  versions (chart 1.0.4 requires the image of the same release). Supports
-  standalone (Deployment + data/logs PVC) and distributed (StatefulSet,
-  erasure-coded, replicaCount >= 2) modes and a single Ingress for both the
-  S3 endpoint and the web console via named service ports
-  (`endpoint`/`console`). Root credentials are mandatory, must not be the
-  well-known `rustfsadmin` (the chart refuses to render such values) and are
-  passed through Helm values from the consumer playbook; the Helm task runs
-  with `no_log`. Config passthrough via `k8s_rustfs_config`, extra env via
-  `k8s_rustfs_extra_env`; input validation lives in
-  `tasks/validate_inputs.yml` and is scratch-runnable without the main role
-  logic.
 - `roles/k8s/postgresql-init-db/` creates a PostgreSQL login-role and database
   through a short-lived in-cluster Job using a pinned official PostgreSQL client
   image; поддерживает готовые Secrets без изменения их жизненного цикла и передачу
