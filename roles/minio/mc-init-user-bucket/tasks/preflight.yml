@@ -1,0 +1,48 @@
+---
+# Preflight: наличие namespace; для сторон на готовых Secret'ах — ожидание
+# Secret'а и непустых значений ключей (значения не читаются и не печатаются —
+# только длины после b64decode). Inline-стороны preflight Secret'ов не ждут.
+- name: Check the target namespace exists
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ minio_mc_init_namespace }}"
+  register: minio_mc_init_namespace_info
+
+- name: Require an existing target namespace
+  ansible.builtin.assert:
+    that:
+      - minio_mc_init_namespace_info.resources | length == 1
+    fail_msg: Create the target namespace before initializing the S3 user and buckets.
+
+- name: Wait for the referenced credential Secrets and required keys
+  vars:
+    minio_mc_init_preflight_secrets: >-
+      {{ ([{'name': minio_mc_init_root_secret_name,
+            'keys': [minio_mc_init_root_access_key,
+                     minio_mc_init_root_secret_key]}]
+         if minio_mc_init_root_secret_name | length > 0 else [])
+        + ([{'name': minio_mc_init_app_secret_name,
+             'keys': [minio_mc_init_app_access_key,
+                      minio_mc_init_app_secret_key]}]
+           if minio_mc_init_app_secret_name | length > 0 else []) }}
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ minio_mc_init_namespace }}"
+    name: "{{ item.name }}"
+  register: minio_mc_init_preflight
+  loop: "{{ minio_mc_init_preflight_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  retries: "{{ minio_mc_init_secret_preflight_retries | int }}"
+  delay: 5
+  until:
+    - minio_mc_init_preflight.resources | length == 1
+    - >-
+      (minio_mc_init_preflight.resources | first).data | default({})
+      | dict2items | selectattr('key', 'in', item['keys'])
+      | map(attribute='value') | map('b64decode') | reject('equalto', '')
+      | list | length == item['keys'] | length
+  when: minio_mc_init_preflight_secrets | length > 0
+  no_log: true

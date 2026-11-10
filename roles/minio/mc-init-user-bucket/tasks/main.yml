@@ -1,0 +1,65 @@
+---
+- name: Validate mc S3 initialization inputs
+  ansible.builtin.assert:
+    that:
+      - minio_mc_init_namespace | length > 0
+      - minio_mc_init_job_name is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+      - minio_mc_init_job_name | length <= 30
+      - minio_mc_init_alias is match('^[a-z0-9][a-z0-9-]*$')
+      - minio_mc_init_mc_image is match('^[A-Za-z0-9][A-Za-z0-9._/-]*$')
+      - "':' not in minio_mc_init_mc_image"
+      - minio_mc_init_mc_image_tag is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - minio_mc_init_endpoint is match('^https?://[^/@ ]+$')
+      - minio_mc_init_user_policy | length > 0
+      - minio_mc_init_buckets | length > 0
+      - minio_mc_init_buckets | select('match', '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') | list | length == minio_mc_init_buckets | length
+      - minio_mc_init_timeout | int > 30
+      # Каждый источник кредов (root / юзер) — ровно один вход: имя Secret'а
+      # или inline-значения. Стороны независимы (гибрид допустим).
+      - >-
+        (minio_mc_init_root_secret_name | length > 0)
+        != ((minio_mc_init_root_access_key_value | length > 0)
+            and (minio_mc_init_root_secret_value | length > 0))
+      - >-
+        (minio_mc_init_app_secret_name | length > 0)
+        != ((minio_mc_init_app_access_key_value | length > 0)
+            and (minio_mc_init_app_secret_value | length > 0))
+      - >-
+        (minio_mc_init_root_secret_name | length == 0)
+        or ((minio_mc_init_root_access_key | length > 0)
+            and (minio_mc_init_root_secret_key | length > 0))
+      - >-
+        (minio_mc_init_app_secret_name | length == 0)
+        or ((minio_mc_init_app_access_key | length > 0)
+            and (minio_mc_init_app_secret_key | length > 0))
+    fail_msg: >-
+      Provide the target namespace, a valid mc alias, a pinned mc image, the
+      in-cluster S3 endpoint, a policy and a non-empty bucket list; for each
+      credential source (root / application user) exactly one input: a ready
+      Secret name with keys, or inline credential values (never both).
+
+- name: Preflight the namespace and the referenced credential Secrets
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Initialize with role-managed temporary inline credentials
+  ansible.builtin.include_tasks: credentials.yml
+  when: >-
+    (minio_mc_init_root_access_key_value | length > 0)
+    or (minio_mc_init_app_secret_value | length > 0)
+    or (minio_mc_init_app_access_key_value | length > 0)
+
+- name: Run the mc initialization Jobs sequentially
+  ansible.builtin.include_tasks: job.yml
+  when: >-
+    (minio_mc_init_root_access_key_value | length == 0)
+    and (minio_mc_init_app_secret_value | length == 0)
+    and (minio_mc_init_app_access_key_value | length == 0)
+
+- name: Report the sanitized summary
+  ansible.builtin.debug:
+    msg: >-
+      S3 application user (access key from
+      {{ minio_mc_init_app_secret_name | default('inline values', true) }})
+      ensured with policy {{ minio_mc_init_user_policy }}; buckets
+      {{ minio_mc_init_buckets | join(', ') }} ensured; credential values
+      stayed in Secrets and were never read or printed.

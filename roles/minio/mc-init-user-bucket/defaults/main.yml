@@ -1,0 +1,48 @@
+---
+# Neutral default; consumers should select their target namespace explicitly.
+minio_mc_init_namespace: default
+# Префикс имён Job'ов: <job_name>-user-add, <job_name>-policy, <job_name>-buckets
+minio_mc_init_job_name: mc-init-user-bucket
+minio_mc_init_labels:
+  app.kubernetes.io/name: mc-init-user-bucket
+  app.kubernetes.io/managed-by: ansible
+# Алиас mc внутри Job'ов (локальное имя подключения, MC_HOST_<alias> и
+# префикс путей в командах mc); на бэкенд не влияет.
+minio_mc_init_alias: s3
+# Scratch-образ mc обязателен: mc удалён из публичных registry (401), а
+# официальный aws-cli требует x86-64-v2 — образ публикует consumer-проект
+# в собственный registry и передаёт сюда явно (репозиторий/тег отдельно).
+minio_mc_init_mc_image: ""
+minio_mc_init_mc_image_tag: ""
+# In-cluster endpoint S3-интерфейса, например http://<svc>.<ns>.svc:9000.
+minio_mc_init_endpoint: ""
+# Root-креды mc-admin-совместимого бэкенда (MinIO, RustFS и т.п.): имя
+# готового Secret'а и имена его ключей (обязательны в secret-режиме —
+# у каждого чарта/проекции свои, дефолтов нет).
+minio_mc_init_root_secret_name: ""
+minio_mc_init_root_access_key: ""
+minio_mc_init_root_secret_key: ""
+# Креды S3-юзера приложения (контракт приложения, обычно S3_*): роль
+# регистрирует их как IAM-юзера (в mc access key — это и есть имя юзера:
+# `admin user add ALIAS ACCESS_KEY SECRET_KEY`), значение Job получает из
+# того же Secret через secretKeyRef.
+minio_mc_init_app_secret_name: ""
+minio_mc_init_app_access_key: S3_ACCESS_KEY
+minio_mc_init_app_secret_key: S3_SECRET_KEY
+# Отдельное «имя юзера» не нужно: access key кредов и есть идентификатор
+# IAM-юзера (виден в `mc admin user list`).
+minio_mc_init_user_policy: readwrite
+# Список имён бакетов, которые должны существовать (создание идемпотентно).
+minio_mc_init_buckets: []
+minio_mc_init_timeout: 330
+minio_mc_init_secret_preflight_retries: 12
+minio_mc_init_kubeconfig: ""
+# --- Inline-режим: значения вместо готовых Secret'ов ---
+# Для каждого источника кредов (root / юзер) ровно один вход: имя Secret'а
+# ИЛИ inline-значения (XOR, стороны независимы). Роль создаёт временный
+# Secret (значения попадают только в no_log-определение, не в логи) и
+# удаляет его после завершения Job'ов.
+minio_mc_init_root_access_key_value: ""
+minio_mc_init_root_secret_value: ""
+minio_mc_init_app_access_key_value: ""
+minio_mc_init_app_secret_value: ""

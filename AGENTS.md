@@ -59,12 +59,22 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   промежуточным set_fact-препом, выражение гнать локальным рендер-тестом на
   фейковых данных (кейс rescue-диагностики `k8s/publish-secrets`,
   2026-11-05).
+- Merge dict'ов в Jinja — только фильтром `combine`: оператор `+` для dict не
+  определён ни в Jinja, ни в Python (`unsupported operand type(s) for +:
+  'dict' and 'dict'` — только на реальном прогоне; list-конкатенация через
+  `+` допустима). Рендер-тест должен покрывать само финальное выражение
+  (stringData/манифест), а не только план задач (кейс
+  `minio/mc-init-user-bucket`, первый prod-прогон inline-режима, 2026-11-10).
 - Значения для `include_tasks.vars`, затеняющие входные имена роли,
-  вычислять eager через `set_fact` до include: ленивая vars-ссылка блока,
+  вычислять eager через `set_fact` до include, и eager-факты должны быть
+  **единственной точкой резолва**: include-vars (include params) стоят выше
+  set_fact в precedence и затеняют их молча. Ленивая vars-ссылка блока,
   ссылающаяся на имя, которое include затеняет, уходит в рекурсию
-  шаблонизации на реальном прогоне, хотя изолированный рендер-тест зелёный
-  (кейс `k8s/postgresql-init-db`, 2026-10-29). Passthrough зарегистрированных
-  переменных (register) безопасен — они уже вычислены.
+  шаблонизации на реальном прогоне (кейс `k8s/postgresql-init-db`,
+  2026-10-29); прослойка include-vars, ссылающаяся на входы роли вместо
+  eager-фактов, даёт пустые значения в secretKeyRef Job'а — API 422
+  (кейс `minio/mc-init-user-bucket`, первый prod-прогон inline-режима,
+  2026-11-10). Include-vars — только passthrough уже вычисленных фактов.
 - Булевы валидации состояний в `assert` проверять на всех комбинациях
   значений до деплоя: условие `a or not b` вместо `a or b` отклоняет валидную
   комбинацию и пропускает невалидную (кейс `k8s/vault`, инцидент

@@ -1,0 +1,85 @@
+---
+# Один шаг плана: пересоздание короткоживущего Job'а и ожидание успеха.
+# Значения секретов в определение Job не попадают: только secretKeyRef и
+# placeholder'ы $(VAR), которые раскрывает kubelet (env и args).
+- name: Remove the stale previous-run Job {{ minio_mc_init_step.suffix }}
+  kubernetes.core.k8s:
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ minio_mc_init_namespace }}"
+    name: "{{ minio_mc_init_job_name }}-{{ minio_mc_init_step.suffix }}"
+
+- name: Create the init Job {{ minio_mc_init_step.suffix }}
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ minio_mc_init_job_name }}-{{ minio_mc_init_step.suffix }}"
+        namespace: "{{ minio_mc_init_namespace }}"
+        labels: "{{ minio_mc_init_labels }}"
+      spec:
+        backoffLimit: 6
+        template:
+          metadata:
+            labels: "{{ minio_mc_init_labels }}"
+          spec:
+            restartPolicy: OnFailure
+            containers:
+              - name: mc
+                image: "{{ minio_mc_init_mc_image }}:{{ minio_mc_init_mc_image_tag }}"
+                env:
+                  - name: ROOT_ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ minio_mc_init_root_secret_name }}"
+                        key: "{{ minio_mc_init_root_access_key }}"
+                  - name: ROOT_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ minio_mc_init_root_secret_name }}"
+                        key: "{{ minio_mc_init_root_secret_key }}"
+                  # Access key юзера — из Secret (он же идентификатор юзера)
+                  - name: APP_ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ minio_mc_init_app_secret_name }}"
+                        key: "{{ minio_mc_init_app_access_key }}"
+                  - name: APP_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ minio_mc_init_app_secret_name }}"
+                        key: "{{ minio_mc_init_app_secret_key }}"
+                  # k8s раскрывает $(VAR) в значениях env по ранее определённым
+                  # переменным; образ scratch — без шелла. Имя env-переменной
+                  # собирается из алиаса: MC_HOST_<alias> задаёт подключение mc.
+                  - name: "MC_HOST_{{ minio_mc_init_alias }}"
+                    value: "{{ minio_mc_init_endpoint | regex_replace('://', '://$(ROOT_ACCESS_KEY):$(ROOT_SECRET_KEY)@') }}"
+                # command в k8s заменяет ENTRYPOINT: образ — scratch с
+                # entrypoint /usr/local/bin/mc, аргументы — в args; $(VAR) в
+                # args kubelet тоже раскрывает по env контейнера
+                args: "{{ minio_mc_init_step.args }}"
+
+- name: Wait for the init Job {{ minio_mc_init_step.suffix }}
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ minio_mc_init_namespace }}"
+    name: "{{ minio_mc_init_job_name }}-{{ minio_mc_init_step.suffix }}"
+  register: minio_mc_init_job
+  retries: "{{ (minio_mc_init_timeout | int // 5) }}"
+  delay: 5
+  until: >-
+    minio_mc_init_job.resources | length == 1
+    and ((minio_mc_init_job.resources[0].status.succeeded | default(0) | int == 1)
+    or (minio_mc_init_job.resources[0].status.failed | default(0) | int > 0))
+
+- name: Assert init Job success {{ minio_mc_init_step.suffix }}
+  ansible.builtin.assert:
+    that:
+      - minio_mc_init_job.resources[0].status.succeeded | default(0) | int == 1
+    fail_msg: >-
+      Job {{ minio_mc_init_job_name }}-{{ minio_mc_init_step.suffix }} не завершился
+      успешно — проверь pod Job и готовность S3-бэкенда (health/ready endpoint).

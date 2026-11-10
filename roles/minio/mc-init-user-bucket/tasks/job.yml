@@ -1,0 +1,27 @@
+---
+# Порядок важен: юзер → политика → бакеты (attach/mb не требуют юзера, но
+# держим детерминированную последовательность). Каждый шаг — свой
+# короткоживущий Job с ожиданием завершения; повторный запуск идемпотентен
+# (user add переустанавливает секрет, attach уже прикреплённой политики —
+# no-op, mb --ignore-existing). Имена Secret'ов и ключей — входы роли; в
+# inline-режиме их перекрывают include-vars credentials.yml на eager-факты
+# (временный Secret + фиксированные ключи) — ленивую vars-прослойку здесь
+# держать нельзя: include-vars затеняют входы, и ленивая ссылка на
+# затеняемое имя уходит в рекурсию/пустоту (кейсы postgresql-init-db
+# 2026-10-29 и mc-init-user-bucket 2026-11-10). Алиас mc — локальное
+# имя подключения (MC_HOST_<alias> и префикс путей), на бэкенд не влияет.
+- name: Run the mc initialization Jobs sequentially
+  ansible.builtin.include_tasks: job-run.yml
+  loop: "{{ minio_mc_init_plan }}"
+  loop_control:
+    loop_var: minio_mc_init_step
+  vars:
+    minio_mc_init_plan:
+      # В mc access key — это и есть имя IAM-юзера
+      - suffix: user-add
+        args: ["admin", "user", "add", "{{ minio_mc_init_alias }}", "$(APP_ACCESS_KEY)", "$(APP_SECRET)"]
+      - suffix: policy
+        args: ["admin", "policy", "attach", "{{ minio_mc_init_alias }}", "{{ minio_mc_init_user_policy }}", "--user", "$(APP_ACCESS_KEY)"]
+      - suffix: buckets
+        args: "{{ ['mb', '--ignore-existing']
+                  + (minio_mc_init_buckets | map('regex_replace', '^(.*)$', minio_mc_init_alias ~ '/\\1') | list) }}"

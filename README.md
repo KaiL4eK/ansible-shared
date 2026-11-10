@@ -146,6 +146,20 @@ Before working with this repository, install Ansible dependencies:
   failure notifications and an on-demand per-bucket restore Job (optional
   bucket/IAM metadata import for disaster recovery) driven by consumer
   playbooks.
+- `roles/k8s/rustfs/` — установка/обновление RustFS (S3-совместимое
+  хранилище, mc-admin-совместимый бэкенд) через upstream Helm chart с пином
+  chart и образов. Топологии standalone (Deployment + PVC) и distributed
+  (StatefulSet, erasure coding), PVC с `helm.sh/resource-policy: keep`.
+  Root-credentials — явные значения consumer'а (`values`) или `generated`
+  (переиспользование Secret чарта либо генерация). Контракт роли:
+  [rustfs](roles/k8s/rustfs/README.md).
+- `roles/minio/mc-init-user-bucket/` — инициализация IAM-юзера, политики и
+  бакетов mc-admin-совместимого S3-бэкенда (MinIO, RustFS) короткоживущими
+  in-cluster Job с `mc`. Креды — только через `secretKeyRef`: готовые
+  Secret'ы consumer'а или временный inline-Secret, который роль создаёт и
+  удаляет в `always` (значения не печатаются; падение создания даёт
+  sanitized-диагностику под `no_log`).
+  [Контракт роли](roles/minio/mc-init-user-bucket/README.md).
 - `roles/k8s/docker-registry-cleanup/` — ночной CronJob чистки тегов Docker
   Registry v2: удаляет устаревшие манифесты по digest через Registry API
   (удаление в реестре должно быть включено; место освобождает его

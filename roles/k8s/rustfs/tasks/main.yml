@@ -1,0 +1,76 @@
+---
+- name: Validate RustFS role inputs
+  ansible.builtin.include_tasks: validate_inputs.yml
+
+- name: Ensure the admin credentials (values or generated/reused from the cluster)
+  ansible.builtin.include_tasks: credentials.yml
+
+- name: Add RustFS Helm repository
+  kubernetes.core.helm_repository:
+    name: "{{ k8s_rustfs_chart_repository_name }}"
+    repo_url: "{{ k8s_rustfs_chart_repository_url }}"
+    state: present
+    force_update: "{{ k8s_rustfs_force_repository_update | bool }}"
+
+# no_log: в values передаются root-креды (REQ-7 — точечно, задача helm скрывается
+# целиком; валидация и helm_repository остаются видимыми).
+- name: Install or upgrade RustFS
+  no_log: true
+  kubernetes.core.helm:
+    name: "{{ k8s_rustfs_release_name }}"
+    chart_ref: "{{ k8s_rustfs_chart_ref }}"
+    chart_version: "{{ k8s_rustfs_chart_version }}"
+    release_namespace: "{{ k8s_rustfs_namespace }}"
+    create_namespace: "{{ k8s_rustfs_create_namespace | bool }}"
+    release_state: present
+    atomic: "{{ k8s_rustfs_atomic | bool }}"
+    wait: "{{ k8s_rustfs_wait | bool }}"
+    take_ownership: "{{ k8s_rustfs_take_ownership | bool }}"
+    timeout: "{{ k8s_rustfs_timeout }}"
+    values:
+      mode:
+        standalone:
+          enabled: "{{ k8s_rustfs_mode == 'standalone' }}"
+        distributed:
+          enabled: "{{ k8s_rustfs_mode == 'distributed' }}"
+      replicaCount: "{{ k8s_rustfs_replica_count }}"
+      drivesPerNode: "{{ k8s_rustfs_drives_per_node }}"
+      image:
+        rustfs: "{{ k8s_rustfs_image_values }}"
+        initImage: "{{ k8s_rustfs_init_image_values }}"
+      secret:
+        rustfs:
+          access_key: "{{ k8s_rustfs_access_key }}"
+          secret_key: "{{ k8s_rustfs_secret_key }}"
+      storageclass:
+        name: "{{ k8s_rustfs_storage_class }}"
+        dataStorageSize: "{{ k8s_rustfs_data_storage_size }}"
+        logStorageSize: "{{ k8s_rustfs_log_storage_size }}"
+      service:
+        type: "{{ k8s_rustfs_service_type }}"
+        endpoint:
+          port: "{{ k8s_rustfs_endpoint_port }}"
+        console:
+          port: "{{ k8s_rustfs_console_port }}"
+      ingress:
+        enabled: "{{ k8s_rustfs_ingress_enabled | bool }}"
+        className: "{{ k8s_rustfs_ingress_class_name }}"
+        # Один Ingress на оба входа: консоль — порт console, S3 API — порт
+        # endpoint (именованные порты Service). При enabled: false чарт
+        # не рендерит Ingress вовсе, хосты-заглушки никуда не попадают.
+        hosts:
+          - host: "{{ k8s_rustfs_ingress_console_host }}"
+            paths:
+              - path: /
+                pathType: Prefix
+                servicePort: console
+          - host: "{{ k8s_rustfs_ingress_api_host }}"
+            paths:
+              - path: /
+                pathType: Prefix
+                servicePort: endpoint
+      config:
+        rustfs: "{{ k8s_rustfs_config }}"
+      extraEnv: "{{ k8s_rustfs_extra_env }}"
+      resources: "{{ k8s_rustfs_resources }}"
+      nodeSelector: "{{ k8s_rustfs_node_selector }}"
