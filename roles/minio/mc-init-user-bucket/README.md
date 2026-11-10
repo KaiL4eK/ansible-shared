@@ -23,7 +23,8 @@ S3-провайдеры (AWS S3, Ceph RGW и т.п.) не поддерживаю
   не печатаются и не попадают в определения Job (только `secretKeyRef` +
   placeholder'ы `$(VAR)`, которые раскрывает kubelet в env и args).
 - **Inline-значения**: креды передаются переменными `*_value`; роль создаёт
-  временный Secret (`generateName`, `no_log`), запускает Job'ы через
+  временный Secret с фиксированным именем `<job_name>-tmp-creds` (`no_log`;
+  остаток прерванного прогона перезаписывается), запускает Job'ы через
   `secretKeyRef` на него и удаляет его в `always`. Для каждого источника —
   ровно один вход: имя Secret'а ИЛИ inline-значения (XOR, валидируется).
 
@@ -41,7 +42,7 @@ IAM-юзера (в mc access key — это и есть имя юзера), пр
 | Переменная | Назначение |
 | --- | --- |
 | `minio_mc_init_namespace` | namespace, где создаются Job'ы и временный Secret |
-| `minio_mc_init_job_name` | префикс Job'ов (`-user-add`, `-policy`, `-buckets`), ≤ 30 символов |
+| `minio_mc_init_job_name` | префикс Job'ов (`-user-add`, `-policy`, `-buckets`) и временного Secret'а (`-tmp-creds`), ≤ 30 символов |
 | `minio_mc_init_labels` | лейблы Job'ов (задаются целиком) |
 | `minio_mc_init_alias` | алиас mc внутри Job'ов (по умолчанию `s3`) |
 | `minio_mc_init_mc_image` / `_mc_image_tag` | pinned scratch-образ mc (обязательны) |

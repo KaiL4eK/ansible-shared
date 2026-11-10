@@ -28,8 +28,8 @@ Secret'а; consumer-плейбуку дублировать проверку н�
 
 Общие входы для всех режимов (полный список — `defaults/main.yml`):
 `k8s_postgresql_init_namespace` (обязателен, должен существовать),
-`k8s_postgresql_init_job_name` (префикс имени Job'а, до 34 символов; фактическое
-имя генерируется сервером и уникально для каждого запуска),
+`k8s_postgresql_init_job_name` (префикс, до 34 символов; имя запуска Job'а =
+префикс + метка времени и уникально для каждого запуска),
 `k8s_postgresql_init_host`/`_port`/`_sslmode`, целевая
 `k8s_postgresql_init_database`, проверочная `k8s_postgresql_init_admin_database`
 (по умолчанию `postgres`), `k8s_postgresql_init_timeout` и необязательный
@@ -70,8 +70,9 @@ roles:
 ### Managed-режим: inline-пароль администратора
 
 `k8s_postgresql_init_manage_credentials: true`. Креды обоих наборов приходят
-из Vault потребителя; роль валидирует входы, создаёт уникальный временный
-Secret с обоими наборами, запускает Job и удаляет Secret в `always`, в том
+из Vault потребителя; роль валидирует входы, создаёт временный Secret с
+фиксированным именем `<job_name>-tmp-creds` (остаток прерванного прогона
+перезаписывается), запускает Job и удаляет Secret в `always`, в том
 числе при ошибке (`no_log: true`, `diff: false`). Имена готовых Secret'ов
 передавать нельзя. Check mode отклоняется.
 
@@ -144,5 +145,7 @@ roles:
   создание/удаление Secrets (секреты резолвит kubelet, SA токен поду не
   выдаётся). Secrets защищать namespace-scoped RBAC и encryption at rest.
   DB-init запускает оператор, не application CI. При принудительном
-  завершении Ansible `always` не гарантирован: оставшийся временный Secret
-  удаляет оператор.
+  завершении Ansible `always` не гарантирован: временный Secret остаётся
+  в кластере, но у него фиксированное имя (`<job_name>-tmp-creds`) —
+  следующий прогон перезаписывает остаток и удаляет его; вручную удалять
+  не обязательно.

@@ -65,6 +65,15 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   `+` допустима). Рендер-тест должен покрывать само финальное выражение
   (stringData/манифест), а не только план задач (кейс
   `minio/mc-init-user-bucket`, первый prod-прогон inline-режима, 2026-11-10).
+- Доступ к полям loop-item только в скобочной нотации `item['keys']`: точечная
+  `item.keys` резолвится в метод `dict.keys`, а не в поле —
+  `default([])` метод не подменяет, `| length` падает
+  `object of type 'builtin_function_or_method' has no len()`
+  (`item.items`/`item.values`/`item.get`/`item.update` — та же ловушка).
+  Латентный баг валиден для всех потребителей роли (кейс
+  `k8s/vso-static-secret`, первый прогон нового consumer'а, 2026-11-10);
+  вызовы самого метода (`k8s_publish_secrets.keys()`) остаются точечной
+  нотацией.
 - Значения для `include_tasks.vars`, затеняющие входные имена роли,
   вычислять eager через `set_fact` до include, и eager-факты должны быть
   **единственной точкой резолва**: include-vars (include params) стоят выше
@@ -90,7 +99,8 @@ This repository contains reusable Ansible roles. Keep changes generic, reusable,
   admin user/password или зависимость от Grafana vault.
 - Use this file for repository-level rules and use `.agents/skills/ansible-role/SKILL.md` for role authoring workflow.
 - Treat `roles/<domain>/<role-name>` as the standard role layout in this repository.
-- Кластерный PostgreSQL bootstrap выполняет `roles/k8s/postgresql-init-db`: плейбук передаёт credentials и настройки, роль валидирует входы, в режиме готовых Secret'ов сама ждёт их наличие, ключи и непустые значения (`k8s_postgresql_init_secret_preflight_retries`), создаёт уникальный временный Secret, запускает Job и удаляет Secret в `always` (`no_log: true`, `diff: false`). Credentials Job получает только через `secretKeyRef`, не через args, SQL или ConfigMap. Сохранять совместимость режима готовых Secrets: в нём роль не создаёт, не изменяет и не удаляет чужие Secrets. Не выносить повторяемый жизненный цикл DB-init ресурсов обратно в consumer playbook.
+- Кластерный PostgreSQL bootstrap выполняет `roles/k8s/postgresql-init-db`: плейбук передаёт credentials и настройки, роль валидирует входы, в режиме готовых Secret'ов сама ждёт их наличие, ключи и непустые значения (`k8s_postgresql_init_secret_preflight_retries`), создаёт временный Secret с фиксированным именем `<job_name>-tmp-creds`, запускает Job (имя = префикс + метка времени: spec Job'а immutable) и удаляет Secret в `always` (`no_log: true`, `diff: false`). Credentials Job получает только через `secretKeyRef`, не через args, SQL или ConfigMap. Сохранять совместимость режима готовых Secrets: в нём роль не создаёт, не изменяет и не удаляет чужие Secrets. Не выносить повторяемый жизненный цикл DB-init ресурсов обратно в consumer playbook.
+- Временные Secret'ы role-managed init/restore Job'ов (`k8s/postgresql-init-db`, `k8s/postgresql-schema`, `minio/mc-init-user-bucket`, `restore-isolated` у `k8s/postgresql-backup-monitoring`) создаются с фиксированным детерминированным именем `<базовое имя>-tmp-creds`: перед созданием идемпотентно удаляется остаток прерванного прогона (перезапись с точным содержимым — состав ключей между режимами меняется), удаление в `always`. Случайные имена (`generateName`) не использовать: прерванный прогон (Ctrl+C, обрыв связи, timeout) не выполняет `always` и оставляет неочищаемого сироту, который с фиксированным именем перезаписывается и удаляется следующим прогоном. Имена самих Job'ов фиксированными без предудаления не делать — spec Job'а immutable, повторный прогон после фикса с изменённым spec отклоняется API.
 - `no_log: true` и `diff: false` ставить на конкретные задачи с credential-значениями, Secret-данными или аутентифицированными запросами. Публичные проверки параметров, безопасные статусы и sanitized-результаты оставлять видимыми; разделять смешанные проверки, а не применять `no_log` ко всей роли/include/block.
 - Имена ролей внутри домена пишутся через дефис (`k8s/postgresql-init-db`, `k8s/postgresql-schema`), не через подчёркивание. Если контракта роли не хватает consumer'у (пример — секретные значения в SQL через psql `\getenv`), расширять роль (у `k8s/postgresql-schema` — `k8s_postgresql_schema_secret_env`), а не дублировать Job-оркестрацию в плейбуке.
 - Keep deployment-specific values outside roles and pass them in explicitly from the consumer.

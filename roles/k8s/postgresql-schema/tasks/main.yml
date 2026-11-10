@@ -125,6 +125,10 @@
              | selectattr('value', 'defined') | list | length > 0) }}
     k8s_postgresql_schema_run_job_name: >-
       {{ k8s_postgresql_schema_job_name }}-{{ now(utc=true, fmt='%H%M%S%f') }}
+    # Временный Secret — фиксированное имя: прогон после прерванного запуска
+    # перезаписывает остаток и удаляет его в always (случайные имена
+    # generateName оставляли неочищаемых сирот; паттерн k8s/postgresql-init-db).
+    k8s_postgresql_schema_temp_secret_name: "{{ k8s_postgresql_schema_job_name }}-tmp-creds"
 
 - name: Wait for the identity credential Secret and required keys
   vars:
@@ -178,14 +182,25 @@
 
 - name: Apply PostgreSQL schema
   block:
-    - name: Create a uniquely named temporary schema credentials Secret
+    - name: Remove the stale temporary schema credentials Secret from an interrupted run
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        namespace: "{{ k8s_postgresql_schema_namespace }}"
+        name: "{{ k8s_postgresql_schema_temp_secret_name }}"
+      when: k8s_postgresql_schema_temp_secret_needed | bool
+      no_log: true
+      diff: false
+
+    - name: Create the deterministic temporary schema credentials Secret
       kubernetes.core.k8s:
         state: present
         definition:
           apiVersion: v1
           kind: Secret
           metadata:
-            generateName: "{{ k8s_postgresql_schema_job_name }}-"
+            name: "{{ k8s_postgresql_schema_temp_secret_name }}"
             namespace: "{{ k8s_postgresql_schema_namespace }}"
             labels:
               app.kubernetes.io/name: postgresql-schema
@@ -197,7 +212,6 @@
                | combine(k8s_postgresql_schema_secret_env
                          | selectattr('value', 'defined')
                          | ansible.builtin.items2dict(key_name='name', value_name='value')) }}
-      register: k8s_postgresql_schema_credentials_secret
       when: k8s_postgresql_schema_temp_secret_needed | bool
       no_log: true
       diff: false
@@ -244,7 +258,7 @@
              else {'valueFrom': {'secretKeyRef':
                                  {'name': (k8s_postgresql_schema_user_secret_name
                                            if k8s_postgresql_schema_user_secret_name | length > 0
-                                           else k8s_postgresql_schema_credentials_secret.result.metadata.name),
+                                           else k8s_postgresql_schema_temp_secret_name),
                                   'key': (k8s_postgresql_schema_user_username_key
                                           if k8s_postgresql_schema_user_secret_name | length > 0
                                           else 'APP_USERNAME')}}} }}
@@ -252,7 +266,7 @@
           {{ {'valueFrom': {'secretKeyRef':
                             {'name': (k8s_postgresql_schema_user_secret_name
                                       if k8s_postgresql_schema_user_secret_name | length > 0
-                                      else k8s_postgresql_schema_credentials_secret.result.metadata.name),
+                                      else k8s_postgresql_schema_temp_secret_name),
                              'key': (k8s_postgresql_schema_user_secret_key
                                      if k8s_postgresql_schema_user_secret_name | length > 0
                                      else 'APP_PASSWORD')}}} }}
@@ -341,12 +355,7 @@
         api_version: v1
         kind: Secret
         namespace: "{{ k8s_postgresql_schema_namespace }}"
-        name: "{{ k8s_postgresql_schema_credentials_secret.result.metadata.name }}"
-      when:
-        - k8s_postgresql_schema_temp_secret_needed | bool
-        - k8s_postgresql_schema_credentials_secret is defined
-        - k8s_postgresql_schema_credentials_secret.result is defined
-        - k8s_postgresql_schema_credentials_secret.result.metadata is defined
-        - k8s_postgresql_schema_credentials_secret.result.metadata.name is defined
+        name: "{{ k8s_postgresql_schema_temp_secret_name }}"
+      when: k8s_postgresql_schema_temp_secret_needed | bool
       no_log: true
       diff: false

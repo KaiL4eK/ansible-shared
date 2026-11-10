@@ -4,7 +4,9 @@
     that:
       - k8s_postgresql_init_namespace | length > 0
       - k8s_postgresql_init_job_name is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
-      - k8s_postgresql_init_job_name | length <= 40
+      # В credentials-режиме имя = префикс + метка времени (см. credentials.yml);
+      # 63 — предел значения label job-name, на которое k8s ссылается подом.
+      - k8s_postgresql_init_job_name | length <= 63
       - "':' in k8s_postgresql_init_image"
       - k8s_postgresql_init_image.split(':')[-1] not in ['latest', 'stable', 'main']
       - k8s_postgresql_init_host | length > 0

@@ -69,19 +69,31 @@
           data:
             restore.sh: "{{ lookup('template', 'isolated-restore-script.sh.j2') }}"
 
-    - name: Создать уникальный временный Secret только с резервными credentials
+    # Фиксированное имя временного Secret: прогон после прерванного запуска
+    # перезаписывает остаток и удаляет его в always (случайные имена
+    # generateName оставляли неочищаемых сирот; паттерн k8s/postgresql-init-db).
+    - name: Удалить остаток временного Secret прерванного прогона
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        namespace: "{{ backup_monitoring_namespace }}"
+        name: "isolated-restore-{{ backup_monitoring_restore_request_id }}-tmp-creds"
+      no_log: true
+      diff: false
+
+    - name: Создать временный Secret с фиксированным именем только с резервными credentials
       kubernetes.core.k8s:
         state: present
         definition:
           apiVersion: v1
           kind: Secret
           metadata:
-            generateName: isolated-restore-
+            name: "isolated-restore-{{ backup_monitoring_restore_request_id }}-tmp-creds"
             namespace: "{{ backup_monitoring_namespace }}"
           type: Opaque
           stringData:
             password: "{{ backup_monitoring_isolated_admin_password }}"
-      register: backup_monitoring_isolated_secret  # noqa: var-naming[no-role-prefix]
       no_log: true
       diff: false
 
@@ -131,16 +143,13 @@
         (backup_monitoring_isolated_job.resources[0].status.conditions | default([]) |
          selectattr('type', 'in', ['Complete', 'Failed']) | selectattr('status', 'equalto', 'True') | list | length == 0)
 
-    - name: Удалить только созданный временный Secret
+    - name: Удалить временный Secret изолированного восстановления
       kubernetes.core.k8s:
         state: absent
         api_version: v1
         kind: Secret
         namespace: "{{ backup_monitoring_namespace }}"
-        name: "{{ backup_monitoring_isolated_secret.result.metadata.name }}"
-      when:
-        - backup_monitoring_isolated_secret is defined
-        - backup_monitoring_isolated_secret.result is defined
+        name: "isolated-restore-{{ backup_monitoring_restore_request_id }}-tmp-creds"
       no_log: true
       diff: false
 

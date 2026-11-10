@@ -7,7 +7,9 @@ Kubernetes Job. PostgreSQL server не устанавливается: Job по�
 
 Все параметры объявлены в `defaults/main.yml`, префикс `k8s_postgresql_schema_`.
 Идентичность Job'а — в одном из двух режимов: managed (по умолчанию) с inline
-`user`/`password` через уникальный временный Secret, либо режим готовых
+`user`/`password` через временный Secret с фиксированным именем
+(`<job_name>-tmp-creds`; остаток прерванного прогона перезаписывается), либо
+режим готовых
 Secret'ов — `user_secret_name` + `user_secret_key`, username ключом
 `user_username_key` или инлайном `user` (XOR, как admin-входы
 `k8/postgresql-init-db`); в этом режиме пароль всегда через `secretKeyRef`,
@@ -18,7 +20,9 @@ Secret'ов — `user_secret_name` + `user_secret_key`, username ключом
 Проверяется существование namespace; check mode отклоняется.
 `k8s_postgresql_schema_job_name` служит префиксом (до 34 символов);
 уникальность имени конкретного запуска Job'а обеспечивает суффикс с меткой
-времени. Необязательный `k8s_postgresql_schema_kubeconfig` позволяет
+времени. Временный Secret имеет фиксированное имя `<job_name>-tmp-creds`:
+прогон после прерванного запуска перезаписывает остаток и удаляет его в
+`always`. Необязательный `k8s_postgresql_schema_kubeconfig` позволяет
 проверить наличие явно выбранного файла без чтения; подключение использует
 стандартные `K8S_AUTH_*`.
 

@@ -13,7 +13,7 @@
       - item.name | length > 0
       - item.path | length > 0
       - item.includes | default([]) | length > 0
-      - item.keys | default([]) | length > 0
+      - item['keys'] | default([]) | length > 0
     fail_msg: >-
       Укажите k8s_vso_namespace/auth_name/mount и список k8s_vso_secrets
       (каждый элемент: name, path, includes, keys).
@@ -121,8 +121,8 @@
   delay: "{{ k8s_vso_key_check_delay | int }}"
   until: >-
     k8s_vso_destinations.resources | length == 1
-    and item.keys | default([]) | length > 0
-    and item.keys | difference(k8s_vso_destinations.resources[0].data | default({}) | dict2items | map(attribute='key') | list) | length == 0
+    and item['keys'] | default([]) | length > 0
+    and item['keys'] | difference(k8s_vso_destinations.resources[0].data | default({}) | dict2items | map(attribute='key') | list) | length == 0
   loop: "{{ k8s_vso_secrets }}"
   loop_control:
     label: "{{ item.destination | default(item.name) }}"

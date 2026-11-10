@@ -33,7 +33,7 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ backup_monitoring_isolated_secret.result.metadata.name }}
+                  name: isolated-restore-{{ backup_monitoring_restore_request_id }}-tmp-creds
                   key: password
             - name: RESTORE_DATABASE
               value: {{ backup_monitoring_restore_target_db_name | to_json }}
