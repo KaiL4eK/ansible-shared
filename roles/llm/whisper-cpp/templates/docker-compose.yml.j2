@@ -1,0 +1,27 @@
+services:
+  whisper-cpp:
+    container_name: {{ whisper_cpp_compose_project_name }}-server
+    image: {{ whisper_cpp_image }}:{{ whisper_cpp_version }}
+{% if whisper_cpp_use_gpu %}
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+{% endif %}
+    restart: unless-stopped
+    ports:
+      - "{{ whisper_cpp_port }}:{{ whisper_cpp_port }}"
+    volumes:
+      - {{ whisper_cpp_host_models_dir }}:{{ whisper_cpp_container_models_dir }}
+      - {{ whisper_cpp_remote_dir }}/start-whisper-cpp.sh:/start-whisper-cpp.sh:ro
+    entrypoint:
+      - /bin/sh
+      - /start-whisper-cpp.sh
+    logging:
+      options:
+        max-file: "5"
+        max-size: "20m"

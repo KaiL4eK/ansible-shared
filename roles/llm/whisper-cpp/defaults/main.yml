@@ -1,0 +1,32 @@
+---
+whisper_cpp_use_gpu: true
+whisper_cpp_strip_cuda_compat_ld_path: true
+
+whisper_cpp_repo: https://github.com/ggml-org/whisper.cpp.git
+whisper_cpp_repo_ref: master
+
+whisper_cpp_image: local/whisper-cpp
+whisper_cpp_version: "{{ whisper_cpp_repo_ref }}-cuda"
+whisper_cpp_build_enabled: true
+whisper_cpp_build_context: .
+whisper_cpp_build_dockerfile: .devops/main-cuda.Dockerfile
+whisper_cpp_build_platform: "{{ 'linux/arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'linux/amd64' }}"
+whisper_cpp_build_args: {}
+whisper_cpp_pull_enabled: false
+
+whisper_cpp_host: 0.0.0.0
+whisper_cpp_port: 8081
+whisper_cpp_threads: "{{ ansible_processor_vcpus | default(8) }}"
+whisper_cpp_processors: 1
+whisper_cpp_enable_flash_attn: true
+whisper_cpp_additional_options: ""
+
+whisper_cpp_remote_dir: "/home/{{ ansible_user }}/ansible/whisper-cpp"
+whisper_cpp_compose_project_name: whisper-cpp
+whisper_cpp_host_models_dir: "{{ whisper_cpp_remote_dir }}/models"
+whisper_cpp_container_models_dir: /models
+whisper_cpp_repo_dir: "{{ whisper_cpp_remote_dir }}/src"
+
+whisper_cpp_model_filename: ggml-large-v3-turbo.bin
+whisper_cpp_model_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{{ whisper_cpp_model_filename }}"
+whisper_cpp_model_path: "{{ whisper_cpp_host_models_dir }}/{{ whisper_cpp_model_filename }}"

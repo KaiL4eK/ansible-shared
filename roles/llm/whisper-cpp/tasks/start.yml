@@ -1,0 +1,38 @@
+---
+- name: Create whisper.cpp start script
+  ansible.builtin.template:
+    src: start-whisper-cpp.sh.j2
+    dest: "{{ whisper_cpp_remote_dir }}/start-whisper-cpp.sh"
+    mode: '0755'
+
+- name: Create docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ whisper_cpp_remote_dir }}/docker-compose.yml"
+    mode: '0644'
+
+- name: Pull whisper.cpp image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ whisper_cpp_remote_dir }}"
+  when: whisper_cpp_pull_enabled | bool
+
+- name: Stop docker compose project before start
+  community.docker.docker_compose_v2:
+    project_src: "{{ whisper_cpp_remote_dir }}"
+    state: stopped
+    remove_orphans: true
+
+- name: Start whisper.cpp service over Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ whisper_cpp_remote_dir }}"
+    pull: never
+    build: never
+    state: present
+    remove_orphans: true
+    wait: true
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      whisper.cpp server is deployed on http://{{ ansible_default_ipv4.address }}:{{ whisper_cpp_port }}
+      Model: {{ whisper_cpp_model_filename }}

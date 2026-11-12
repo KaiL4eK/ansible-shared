@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: whisper_cpp
+  author: Alexey Devyatkin
+  description: whisper.cpp speech-to-text server (OpenAI-compatible HTTP API) with a pinned GGML model
+  license: MIT
+  min_ansible_version: "2.17"
+dependencies: []

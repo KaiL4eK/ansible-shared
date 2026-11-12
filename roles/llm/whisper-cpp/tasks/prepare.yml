@@ -1,0 +1,39 @@
+---
+- name: Ensure whisper.cpp directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ whisper_cpp_remote_dir }}"
+    - "{{ whisper_cpp_host_models_dir }}"
+
+- name: Clone whisper.cpp repository
+  ansible.builtin.git:
+    repo: "{{ whisper_cpp_repo }}"
+    dest: "{{ whisper_cpp_repo_dir }}"
+    version: "{{ whisper_cpp_repo_ref }}"
+    clone: true
+    update: true
+
+- name: Build whisper.cpp CUDA image on target platform
+  # One-shot docker build from the pinned checkout; the image tag follows the
+  # repo ref, so re-runs with an unchanged ref reuse the cached image layers.
+  ansible.builtin.command: >-
+    docker build
+    -f {{ whisper_cpp_build_dockerfile }}
+    -t {{ whisper_cpp_image }}:{{ whisper_cpp_version }}
+    {% for item in whisper_cpp_build_args | default({}) | dict2items %}--build-arg {{ item.key }}={{ item.value }} {% endfor %}
+    {% if whisper_cpp_build_platform | length > 0 %}--platform {{ whisper_cpp_build_platform }} {% endif %}
+    {{ whisper_cpp_build_context }}
+  args:
+    chdir: "{{ whisper_cpp_repo_dir }}"
+  changed_when: true
+  when: whisper_cpp_build_enabled | bool
+
+- name: Download whisper.cpp model
+  ansible.builtin.get_url:
+    url: "{{ whisper_cpp_model_url }}"
+    dest: "{{ whisper_cpp_model_path }}"
+    mode: '0644'
+    force: false

@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+{% if whisper_cpp_strip_cuda_compat_ld_path | bool %}
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  filtered_ld_library_path=""
+  old_ifs="$IFS"
+  IFS=:
+  for path in $LD_LIBRARY_PATH; do
+    case "$path" in
+      */compat*)
+        ;;
+      *)
+        if [ -n "$filtered_ld_library_path" ]; then
+          filtered_ld_library_path="$filtered_ld_library_path:$path"
+        else
+          filtered_ld_library_path="$path"
+        fi
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  if [ -n "$filtered_ld_library_path" ]; then
+    export LD_LIBRARY_PATH="$filtered_ld_library_path"
+  else
+    unset LD_LIBRARY_PATH
+  fi
+fi
+{% endif %}
+
+exec whisper-server \
+  --host {{ whisper_cpp_host }} \
+  --port {{ whisper_cpp_port }} \
+  --model {{ whisper_cpp_container_models_dir }}/{{ whisper_cpp_model_filename }} \
+  --threads {{ whisper_cpp_threads }} \
+  --processors {{ whisper_cpp_processors }} \
+{% if not whisper_cpp_use_gpu %}
+  --no-gpu \
+{% endif %}
+{% if whisper_cpp_enable_flash_attn %}
+  --flash-attn \
+{% endif %}
+{% if whisper_cpp_additional_options | length > 0 %}
+  {{ whisper_cpp_additional_options }} \
+{% endif %}
+  "$@"
