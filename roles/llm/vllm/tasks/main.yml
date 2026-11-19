@@ -70,6 +70,9 @@
     src: .env.j2
     dest: "{{ vllm_remote_dir }}/.env"
     mode: '0600'
+  # The rendered file carries the API key and HF token; no_log also
+  # disables the diff, so credentials never reach playbook output.
+  no_log: true
 
 - name: Create dynamic GPU entrypoint
   ansible.builtin.template:
@@ -110,6 +113,12 @@
     remove_orphans: true
     wait: true
     wait_timeout: "{{ vllm_compose_wait_timeout }}"
+  # Module output echoes the per-container command line, which carries
+  # --api-key (credentials must not reach playbook or CI logs). On failure,
+  # inspect the stack on the host instead:
+  #   docker compose --project-directory {{ vllm_remote_dir }} logs
+  # or check `docker ps` / `docker logs <container>` for the root cause.
+  no_log: true
 
 - name: Show deployment info
   ansible.builtin.debug:
