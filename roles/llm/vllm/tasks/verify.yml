@@ -2,15 +2,23 @@
 # Optional post-deploy verification (vllm_verify_enabled): issue real API
 # requests against the running server and assert meaningful responses.
 # The Compose healthcheck only proves /health responds; these checks prove
-# the model is actually served and generates (e.g. it would have caught a
-# server started without --enable-auto-tool-choice for tool_choice users).
+# the model is actually served and responds with real content.
+# vllm_verify_mode selects the probe:
+#   chat  — /v1/chat/completions generation check (default, chat models);
+#   embed — /v1/embeddings vector check (pooling/embedding models).
+# A score/rerank server is not covered by either probe yet; keep
+# vllm_verify_enabled: false for those deployments.
 - name: Resolve verification base URL
   ansible.builtin.set_fact:
     vllm_verify_base_url: "http://{{ ansible_default_ipv4.address }}:{{ vllm_port }}"
 
 - name: Resolve verification target model id
   ansible.builtin.set_fact:
-    vllm_verify_model_id: "{{ vllm_served_model_name if vllm_served_model_name else vllm_model_name }}"
+    # Multiple served aliases are passed as one space-separated string
+    # (--served-model-name accepts nargs='+'), while /v1/models lists them
+    # individually; the first alias is the canonical id used by metrics and
+    # proxy mappings, so verify that one.
+    vllm_verify_model_id: "{{ (vllm_served_model_name if vllm_served_model_name else vllm_model_name) | trim | split(' ') | first }}"
 
 - name: Prepare verification API headers
   ansible.builtin.set_fact:
@@ -18,6 +26,14 @@
       {{ {'Authorization': 'Bearer ' ~ (vllm_api_key | string)}
          if (vllm_api_key | default('', true) | string | length > 0) else {} }}
   no_log: true
+
+- name: Verify the selected verification mode is supported
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_mode in ['chat', 'embed']
+    fail_msg: >-
+      Unsupported vllm_verify_mode '{{ vllm_verify_mode }}':
+      expected 'chat' or 'embed'.
 
 - name: Request served models for verification
   ansible.builtin.uri:
@@ -62,6 +78,7 @@
   no_log: true
   failed_when: false
   register: vllm_verify_completion
+  when: vllm_verify_mode == 'chat'
 
 - name: Verify chat completion HTTP response
   ansible.builtin.assert:
@@ -73,10 +90,12 @@
       HTTP status: {{ vllm_verify_completion.status | default('n/a') }};
       detail: {{ vllm_verify_completion.msg | default('') | truncate(300) }};
       body: {{ vllm_verify_completion.content | default('') | truncate(300) }}
+  when: vllm_verify_mode == 'chat'
 
 - name: Extract verification completion content
   ansible.builtin.set_fact:
     vllm_verify_content: "{{ (vllm_verify_completion.json.choices[0].message.content | default('', true)) | trim }}"
+  when: vllm_verify_mode == 'chat'
 
 - name: Verify chat completion content is not empty
   ansible.builtin.assert:
@@ -87,6 +106,7 @@
       '{{ vllm_verify_prompt }}' (max_tokens={{ vllm_verify_max_tokens }});
       consider raising vllm_verify_max_tokens or adjusting vllm_verify_prompt.
       Body: {{ vllm_verify_completion.content | default('') | truncate(300) }}
+  when: vllm_verify_mode == 'chat'
 
 - name: Verify expected content substring
   ansible.builtin.assert:
@@ -95,10 +115,62 @@
     fail_msg: >-
       Expected '{{ vllm_verify_expect_contains }}' in completion content:
       {{ vllm_verify_content | truncate(300) }}
-  when: vllm_verify_expect_contains | length > 0
+  when: vllm_verify_mode == 'chat' and vllm_verify_expect_contains | length > 0
+
+- name: Request verification embedding
+  ansible.builtin.uri:
+    url: "{{ vllm_verify_base_url }}/v1/embeddings"
+    method: POST
+    headers: "{{ vllm_verify_headers }}"
+    body_format: json
+    body:
+      model: "{{ vllm_verify_model_id }}"
+      input: "{{ vllm_verify_prompt }}"
+    return_content: true
+    timeout: "{{ vllm_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: vllm_verify_embedding
+  when: vllm_verify_mode == 'embed'
+
+- name: Verify embedding HTTP response
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_embedding.status == 200
+      - vllm_verify_embedding.json is defined
+    fail_msg: >-
+      Embedding verification failed for {{ vllm_verify_base_url }}/v1/embeddings.
+      HTTP status: {{ vllm_verify_embedding.status | default('n/a') }};
+      detail: {{ vllm_verify_embedding.msg | default('') | truncate(300) }};
+      body: {{ vllm_verify_embedding.content | default('') | truncate(300) }}
+  when: vllm_verify_mode == 'embed'
+
+- name: Extract verification embedding vector
+  ansible.builtin.set_fact:
+    vllm_verify_vector: "{{ vllm_verify_embedding.json.data[0].embedding | default([], true) }}"
+  when: vllm_verify_mode == 'embed'
+
+- name: Verify embedding vector is not empty and numeric
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_vector | length > 0
+      - vllm_verify_vector | first is number
+    fail_msg: >-
+      Embedding response has no usable vector for input
+      '{{ vllm_verify_prompt }}'.
+      Body: {{ vllm_verify_embedding.content | default('') | truncate(300) }}
+  when: vllm_verify_mode == 'embed'
 
 - name: Show verification result
   ansible.builtin.debug:
     msg: >-
       Verification OK: model {{ vllm_verify_model_id }} replied:
       {{ vllm_verify_content | truncate(200) }}
+  when: vllm_verify_mode == 'chat'
+
+- name: Show verification result
+  ansible.builtin.debug:
+    msg: >-
+      Verification OK: model {{ vllm_verify_model_id }} returned a
+      {{ vllm_verify_vector | length }}-dimension embedding.
+  when: vllm_verify_mode == 'embed'

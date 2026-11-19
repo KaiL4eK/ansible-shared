@@ -39,17 +39,25 @@ Mamba SSM cache: `vllm_watermark`, `vllm_mamba_ssm_cache_dtype`,
 Set `vllm_verify_enabled: true` to verify the deployed server with real API
 requests after it becomes healthy:
 
-- `GET /v1/models` — the expected served model
-  (`vllm_served_model_name` or `vllm_model_name`) must be listed.
-- `POST /v1/chat/completions` with `vllm_verify_prompt` — non-empty assistant
-  content is required; when `vllm_verify_expect_contains` is set, that
-  case-insensitive substring must appear in the content.
+- `GET /v1/models` — the expected served model must be listed. With multiple
+  space-separated served aliases (`--served-model-name id-a id-b`), the first
+  alias is used as the verification target (it is the canonical id reported by
+  metrics and proxy mappings).
+- Then the probe selected by `vllm_verify_mode` runs:
+  - `chat` (default) — `POST /v1/chat/completions` with `vllm_verify_prompt` —
+    non-empty assistant content is required; when `vllm_verify_expect_contains`
+    is set, that case-insensitive substring must appear in the content.
+  - `embed` — `POST /v1/embeddings` with `vllm_verify_prompt` as input — a
+    non-empty numeric vector is required. Use this mode for pooling/embedding
+    models (e.g. `Qwen/Qwen3-Embedding-*`, `BAAI/bge-*`); those servers do not
+    expose `/v1/chat/completions`, so the default `chat` probe would fail.
 
-The Compose healthcheck only proves `/health` responds; these checks prove the
-model is actually served and generates text.
+A score/rerank server (e.g. `jinaai/jina-reranker-v3`) is not covered by
+either probe yet; keep `vllm_verify_enabled: false` for those deployments.
 
 Additional variables (full defaults in `defaults/main.yml`):
-`vllm_verify_timeout` (per-request timeout in seconds), `vllm_verify_max_tokens`,
+`vllm_verify_mode` (`chat` or `embed`, see above), `vllm_verify_timeout`
+(per-request timeout in seconds), `vllm_verify_max_tokens`,
 `vllm_verify_temperature`, `vllm_verify_prompt`, `vllm_verify_expect_contains`.
 
 Requests are sent from the Ansible controller to

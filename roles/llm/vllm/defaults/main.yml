@@ -83,6 +83,11 @@ vllm_ulimits: {}
 # http://<host default IPv4>:<vllm_port>, so that address must be reachable
 # from the controller.
 vllm_verify_enabled: false
+# Verification probe sent after the server becomes healthy:
+# 'chat' — POST /v1/chat/completions (generative chat models);
+# 'embed' — POST /v1/embeddings (pooling/embedding models);
+# a score/rerank server is not covered by either probe yet.
+vllm_verify_mode: chat
 # Per-request timeout in seconds.
 vllm_verify_timeout: 300
 # Sampling settings for the verification completion (deterministic by default).
