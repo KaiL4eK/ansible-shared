@@ -102,8 +102,12 @@ vllm_verify_timeout: 300
 # Sampling settings for the verification completion (deterministic by default).
 vllm_verify_max_tokens: 512
 vllm_verify_temperature: 0
-# Prompt for the verification completion; non-empty assistant content is
-# required for the check to pass.
-vllm_verify_prompt: "Reply with exactly one word: OK"
-# Optional case-insensitive substring expected in the completion content.
-vllm_verify_expect_contains: ""
+# Prompt for the verification completion. Default asks a simple question
+# with a single unambiguous correct answer, and vllm_verify_expect_contains
+# checks the content actually contains that answer — the probe proves the
+# model produces correct responses, not just non-empty ones. When overriding
+# the prompt, override the expected substring too.
+vllm_verify_prompt: "What is 2 + 2? Reply with only the number."
+# Case-insensitive substring expected in the completion content; the
+# verification fails when it is missing.
+vllm_verify_expect_contains: "4"

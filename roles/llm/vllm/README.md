@@ -45,8 +45,11 @@ requests after it becomes healthy:
   metrics and proxy mappings).
 - Then the probe selected by `vllm_verify_mode` runs:
   - `chat` (default) — `POST /v1/chat/completions` with `vllm_verify_prompt` —
-    non-empty assistant content is required; when `vllm_verify_expect_contains`
-    is set, that case-insensitive substring must appear in the content.
+    non-empty assistant content is required, and the case-insensitive
+    `vllm_verify_expect_contains` substring must appear in it. The defaults
+    (`"What is 2 + 2? Reply with only the number."` + `"4"`) prove the model
+    answers a simple question correctly, not just with any content. When
+    overriding the prompt, override the expected substring too.
   - `embed` — `POST /v1/embeddings` with `vllm_verify_prompt` as input — a
     non-empty numeric vector is required. Use this mode for pooling/embedding
     models (e.g. `Qwen/Qwen3-Embedding-*`, `BAAI/bge-*`); those servers do not
