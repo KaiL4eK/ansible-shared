@@ -111,3 +111,24 @@ vllm_verify_prompt: "What is 2 + 2? Reply with only the number."
 # Case-insensitive substring expected in the completion content; the
 # verification fails when it is missing.
 vllm_verify_expect_contains: "4"
+# Optional tool-calling probe (chat mode only): when enabled, a second chat
+# request is sent with a small function schema and tool_choice "auto", and the
+# role asserts the model returns a valid OpenAI tool_calls response
+# (finish_reason "tool_calls", expected function name, JSON-parsable
+# arguments). On by default for chat deployments; requires the deployment to
+# serve with --enable-auto-tool-choice and a --tool-call-parser — set it to
+# false for chat models without tool support.
+vllm_verify_tool_call_enabled: true
+# Prompt for the tool-call probe; default asks for the provided tool usage so
+# the model is expected to emit a tool call instead of answering in content.
+vllm_verify_tool_prompt: "What is the current weather in Paris? Use the provided tool."
+# Tools schema (JSON string) sent with the tool-call probe.
+vllm_verify_tools: >-
+  [{"type": "function", "function": {"name": "get_weather",
+  "description": "Get current weather for a city",
+  "parameters": {"type": "object",
+  "properties": {"city": {"type": "string", "description": "City name"},
+  "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}},
+  "required": ["city"]}}}]
+# Function name expected in the returned tool call.
+vllm_verify_tool_function_name: "get_weather"

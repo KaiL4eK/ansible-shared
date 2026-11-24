@@ -117,6 +117,56 @@
       {{ vllm_verify_content | truncate(300) }}
   when: vllm_verify_mode == 'chat' and vllm_verify_expect_contains | length > 0
 
+- name: Request verification tool call completion
+  ansible.builtin.uri:
+    url: "{{ vllm_verify_base_url }}/v1/chat/completions"
+    method: POST
+    headers: "{{ vllm_verify_headers }}"
+    body_format: json
+    body:
+      model: "{{ vllm_verify_model_id }}"
+      messages:
+        - role: user
+          content: "{{ vllm_verify_tool_prompt }}"
+      tools: "{{ vllm_verify_tools | from_json }}"
+      tool_choice: auto
+      max_tokens: "{{ vllm_verify_max_tokens | int }}"
+      temperature: "{{ vllm_verify_temperature }}"
+    return_content: true
+    timeout: "{{ vllm_verify_timeout }}"
+  no_log: true
+  failed_when: false
+  register: vllm_verify_tool_completion
+  when: vllm_verify_mode == 'chat' and vllm_verify_tool_call_enabled | bool
+
+- name: Extract verification tool call fields
+  ansible.builtin.set_fact:
+    vllm_verify_tool_calls: "{{ vllm_verify_tool_completion.json.choices[0].message.tool_calls | default([], true) }}"
+    vllm_verify_tool_finish_reason: "{{ vllm_verify_tool_completion.json.choices[0].finish_reason | default('', true) }}"
+  when: vllm_verify_mode == 'chat' and vllm_verify_tool_call_enabled | bool
+
+- name: Verify tool call response is a valid OpenAI tool call
+  ansible.builtin.assert:
+    that:
+      - vllm_verify_tool_completion.status == 200
+      - vllm_verify_tool_calls | length > 0
+      - vllm_verify_tool_calls[0]['function']['name'] == vllm_verify_tool_function_name
+      - vllm_verify_tool_calls[0]['function']['arguments'] | from_json | length > 0
+      - vllm_verify_tool_finish_reason == 'tool_calls'
+    fail_msg: >-
+      Tool call verification failed for {{ vllm_verify_base_url }}/v1/chat/completions.
+      HTTP status: {{ vllm_verify_tool_completion.status | default('n/a') }};
+      finish_reason: {{ vllm_verify_tool_finish_reason | default('n/a') }};
+      tool_calls: {{ vllm_verify_tool_calls | default([]) | to_json | truncate(300) }};
+      detail: {{ vllm_verify_tool_completion.msg | default('') | truncate(300) }};
+      body: {{ vllm_verify_tool_completion.content | default('') | truncate(300) }}
+    success_msg: >-
+      Tool call verification OK: model {{ vllm_verify_model_id }} called
+      '{{ vllm_verify_tool_calls[0]['function']['name'] }}' with args
+      {{ vllm_verify_tool_calls[0]['function']['arguments'] }}
+      (finish_reason: {{ vllm_verify_tool_finish_reason }})
+  when: vllm_verify_mode == 'chat' and vllm_verify_tool_call_enabled | bool
+
 - name: Request verification embedding
   ansible.builtin.uri:
     url: "{{ vllm_verify_base_url }}/v1/embeddings"

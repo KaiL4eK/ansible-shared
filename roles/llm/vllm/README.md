@@ -54,6 +54,14 @@ requests after it becomes healthy:
     non-empty numeric vector is required. Use this mode for pooling/embedding
     models (e.g. `Qwen/Qwen3-Embedding-*`, `BAAI/bge-*`); those servers do not
     expose `/v1/chat/completions`, so the default `chat` probe would fail.
+- Optional tool-call probe (chat mode only, on by default): set
+  `vllm_verify_tool_call_enabled: false` to skip it. When enabled, a second
+  chat request is sent with `vllm_verify_tools` (default `get_weather`
+  schema) and `tool_choice: auto`. The probe asserts a valid OpenAI
+  `tool_calls` response: non-empty `tool_calls`, function name equal to
+  `vllm_verify_tool_function_name`, JSON-parsable arguments, and
+  `finish_reason: tool_calls`. The deployment must serve with
+  `--enable-auto-tool-choice` and a `--tool-call-parser`.
 
 A score/rerank server (e.g. `jinaai/jina-reranker-v3`) is not covered by
 either probe yet; keep `vllm_verify_enabled: false` for those deployments.
