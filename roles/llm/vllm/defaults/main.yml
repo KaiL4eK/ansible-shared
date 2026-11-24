@@ -75,6 +75,15 @@ vllm_override_generation_config:
 # deployment via vllm_ipc_host / vllm_ulimits.
 vllm_ipc_host: false
 vllm_ulimits: {}
+# Optional docker compose security_opt entries. Needed by recipes that use
+# io_uring inside the container: the default Docker seccomp profile blocks
+# the io_uring syscalls (example: eugr/spark-vllm-b12x with
+# B12X_DISK_BACKEND=io_uring).
+# Example:
+#   vllm_security_opts:
+#     - seccomp=unconfined
+#     - apparmor=unconfined
+vllm_security_opts: []
 
 # --- Optional post-deploy verification ---------------------------------------
 # When enabled, after the service becomes healthy the role sends

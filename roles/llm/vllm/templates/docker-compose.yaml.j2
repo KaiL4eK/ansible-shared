@@ -124,6 +124,12 @@ services:
 {% if vllm_ipc_host %}
     ipc: host
 {% endif %}
+{% if vllm_security_opts %}
+    security_opt:
+{% for opt in vllm_security_opts %}
+      - {{ opt }}
+{% endfor %}
+{% endif %}
 {% if vllm_ulimits %}
     ulimits:
 {% for ulimit_name, ulimit_value in vllm_ulimits.items() %}
