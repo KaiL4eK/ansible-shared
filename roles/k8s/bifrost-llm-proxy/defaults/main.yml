@@ -155,3 +155,15 @@ bifrost_llm_proxy_metrics_resources:
   requests:
     cpu: 50m
     memory: 32Mi
+
+# --- Custom plugins (Go .so, chart value bifrost.plugins.custom) ------------
+# Entries for dynamically loaded Go plugins baked into the image (see
+# bifrost-plugins/README.md in the consumer repository for the ABI contract).
+# Each entry is passed verbatim to the chart: name, enabled, path and
+# plugin-specific config; the chart requires name/enabled/path and this role
+# validates them before rendering. An empty list keeps the chart default
+# (no custom plugins). Declaring an entry makes it file-backed in config.json:
+# Bifrost's split-mode reconciliation compares the entry's hash at startup and
+# a changed entry (config edit here or a chart bump that renders new fields)
+# overwrites the DB/UI version of that plugin.
+bifrost_llm_proxy_plugins_custom: []

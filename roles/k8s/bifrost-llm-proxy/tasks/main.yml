@@ -19,6 +19,40 @@
     - bifrost_llm_proxy_logs_store_type == 'postgres'
     - bifrost_llm_proxy_logs_postgres_enabled | bool
 
+- name: Validate custom plugin entries
+  vars:
+    bifrost_llm_proxy_plugins_custom_names: >-
+      {{ bifrost_llm_proxy_plugins_custom | map(attribute='name', default='') | list }}
+    bifrost_llm_proxy_plugins_custom_paths: >-
+      {{ bifrost_llm_proxy_plugins_custom | map(attribute='path', default='') | list }}
+  ansible.builtin.assert:
+    that:
+      # Every entry needs a name and a path to the compiled .so (the chart
+      # renders them into the plugins array of config.json).
+      - bifrost_llm_proxy_plugins_custom_names | reject('equalto', '') | list | length == bifrost_llm_proxy_plugins_custom | length
+      - bifrost_llm_proxy_plugins_custom_paths | reject('equalto', '') | list | length == bifrost_llm_proxy_plugins_custom | length
+      # The chart template requires an explicit enabled flag on every entry.
+      - bifrost_llm_proxy_plugins_custom | selectattr('enabled', 'defined') | list | length == bifrost_llm_proxy_plugins_custom | length
+      # Plugin names must be unique: bifrost uses them as identifiers.
+      - bifrost_llm_proxy_plugins_custom_names | unique | list | length == bifrost_llm_proxy_plugins_custom_names | length
+    fail_msg: >-
+      Each bifrost_llm_proxy_plugins_custom entry needs a unique non-empty name,
+      a non-empty path and an enabled flag;
+      names={{ bifrost_llm_proxy_plugins_custom_names }},
+      paths={{ bifrost_llm_proxy_plugins_custom_paths }}.
+
+- name: Validate log retention days input
+  # The chart's values.schema.json (2.1.50+) types bifrost.client.logRetentionDays
+  # as integer. The value is passed to the chart as-is: a quoted
+  # "{{ ... | int }}" renders as a string (non-native Jinja stringifies
+  # filter results) and fails the schema, so the consumer must supply a number.
+  ansible.builtin.assert:
+    that:
+      - bifrost_llm_proxy_log_retention_days is number
+    fail_msg: >-
+      bifrost_llm_proxy_log_retention_days must be a number
+      (got {{ bifrost_llm_proxy_log_retention_days | type_debug }}).
+
 - name: Add Bifrost LLM Proxy helm repository
   kubernetes.core.helm_repository:
     name: "{{ bifrost_llm_proxy_chart_repo_name }}"
@@ -77,8 +111,13 @@
           enforceAuthOnInference: "{{ bifrost_llm_proxy_enforce_auth_on_inference | bool }}"
           enableLogging: "{{ bifrost_llm_proxy_enable_logging | bool }}"
           disableContentLogging: "{{ bifrost_llm_proxy_disable_content_logging | bool }}"
-          logRetentionDays: "{{ bifrost_llm_proxy_log_retention_days | int }}"
+          # Plain variable reference: "| int" stringifies the value and fails
+          # the chart values schema (integer required); the type guard above
+          # ensures the consumer passes a number.
+          logRetentionDays: "{{ bifrost_llm_proxy_log_retention_days }}"
           vkRotationCooldown: "{{ bifrost_llm_proxy_vk_rotation_cooldown }}"
+        plugins:
+          custom: "{{ bifrost_llm_proxy_plugins_custom }}"
       postgresql:
         external:
           enabled: "{{ bifrost_llm_proxy_postgres_enabled }}"
