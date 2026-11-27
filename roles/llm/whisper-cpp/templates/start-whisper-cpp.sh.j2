@@ -40,6 +40,8 @@ exec whisper-server \
 {% endif %}
 {% if whisper_cpp_enable_flash_attn %}
   --flash-attn \
+{% else %}
+  --no-flash-attn \
 {% endif %}
 {% if whisper_cpp_additional_options | length > 0 %}
   {{ whisper_cpp_additional_options }} \
